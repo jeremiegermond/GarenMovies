@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Send } from 'lucide-react';
 
 function formatTime(ts) {
   const d = new Date(ts);
@@ -51,19 +52,20 @@ export default function Chat({ socket, visible, onUnreadChange, currentNickname 
   return (
     <aside className={`chat-panel ${visible ? 'open' : 'closed'}`}>
       <div className="chat-header">
-        <h3>💬 Chat</h3>
+        <h3>Chat</h3>
+        <span className="chat-header-meta">{messages.length} message{messages.length !== 1 ? 's' : ''}</span>
       </div>
       <div className="chat-list" ref={listRef}>
         {messages.length === 0 ? (
-          <div className="chat-empty">Aucun message — soyez le premier à écrire</div>
+          <div className="chat-empty">Aucun message.<br />Soyez le premier à écrire.</div>
         ) : (
           messages.map((m, i) => {
             const mine = m.nickname === currentNickname;
             return (
-              <div key={i} className={`chat-msg ${mine ? 'mine' : ''} ${m.isHost ? 'host' : ''}`}>
+              <div key={i} className={`chat-msg ${mine ? 'mine' : ''}`}>
                 <div className="chat-meta">
                   <span className="chat-name">{m.nickname}</span>
-                  {m.isHost && <span className="chat-badge">HÔTE</span>}
+                  {m.isHost && <span className="chat-host-tag">Hôte</span>}
                   <span className="chat-time">{formatTime(m.ts)}</span>
                 </div>
                 <div className="chat-text">{m.text}</div>
@@ -77,10 +79,12 @@ export default function Chat({ socket, visible, onUnreadChange, currentNickname 
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="Écris un message…"
+          placeholder="Écrire un message"
           maxLength={500}
         />
-        <button className="primary" onClick={send} disabled={!text.trim()}>Envoyer</button>
+        <button className="primary" onClick={send} disabled={!text.trim()} title="Envoyer">
+          <Send size={15} strokeWidth={2} />
+        </button>
       </div>
     </aside>
   );

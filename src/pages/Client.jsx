@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
+import { LogOut, ArrowRight } from 'lucide-react';
 import Tabs from '../components/Tabs.jsx';
 import CatalogueView from '../components/CatalogueView.jsx';
 import Chat from '../components/Chat.jsx';
@@ -91,7 +92,6 @@ export default function Client({ onLeave }) {
   useEffect(() => () => socketRef.current?.disconnect(), []);
 
   function clientSelectMovie(_m) {
-    // Client can't change the playing media — switching to Room shows what's playing
     setTab('room');
   }
 
@@ -102,7 +102,6 @@ export default function Client({ onLeave }) {
 
   const streamBase = baseRef.current || '';
   const streamSrc = activeId && streamBase ? `${streamBase}/api/stream/${activeId}` : null;
-  const totalCount = (catalog.catalogue?.length || 0) + (catalog.stream?.length || 0);
 
   return (
     <div className="app">
@@ -113,7 +112,7 @@ export default function Client({ onLeave }) {
         onToggleChat={() => setChatOpen((o) => !o)}
         onOpenSettings={() => setSettingsOpen(true)}
         onLeave={onLeave}
-        badges={{ catalogue: totalCount, unread }}
+        badges={{ unread }}
       />
       <div className="page-body">
         <div className="page-main">
@@ -125,33 +124,47 @@ export default function Client({ onLeave }) {
               canSelect={connected}
               connected={connected}
               hasApiKey={true}
+              isHost={false}
               onOpenSettings={() => setSettingsOpen(true)}
             />
           ) : (
             <div className="workspace">
               <aside className="sidebar">
-                <div className="room-card">
+                <div className="room-block">
                   {connected ? (
                     <>
-                      <h3>Connecté</h3>
-                      <div className="room-code">{baseRef.current}</div>
-                      <div className="viewers">
-                        <span className="dot" />{viewers} autre{viewers !== 1 ? 's' : ''} ami{viewers !== 1 ? 's' : ''}
+                      <div className="section-label">Connecté au salon</div>
+                      <div className="room-url-display">
+                        <span className="room-url-text">{baseRef.current}</span>
                       </div>
-                      <button onClick={disconnect}>Quitter la room</button>
+                      <div className="viewers-line">
+                        <span className="dot-online" />
+                        {viewers === 0
+                          ? 'Vous êtes seul avec l\'hôte'
+                          : `${viewers} autre${viewers > 1 ? 's' : ''} invité${viewers > 1 ? 's' : ''}`}
+                      </div>
+                      <button onClick={disconnect}>
+                        <LogOut size={14} strokeWidth={1.75} />
+                        Quitter le salon
+                      </button>
                     </>
                   ) : (
                     <>
-                      <h3>Rejoindre une room</h3>
+                      <div className="section-label">Rejoindre un salon</div>
                       <input
                         value={roomURL}
                         onChange={(e) => setRoomURL(e.target.value)}
-                        placeholder="URL ou IP de la room"
+                        placeholder="URL ou IP du salon"
                         onKeyDown={(e) => e.key === 'Enter' && !connecting && join()}
                         disabled={connecting}
                       />
                       <button className="primary" onClick={join} disabled={!roomURL.trim() || connecting}>
-                        {connecting ? 'Connexion…' : 'Rejoindre'}
+                        {connecting ? 'Connexion…' : (
+                          <>
+                            Rejoindre
+                            <ArrowRight size={14} strokeWidth={2} />
+                          </>
+                        )}
                       </button>
                       {error && <div className="error">{error}</div>}
                     </>
@@ -160,9 +173,11 @@ export default function Client({ onLeave }) {
 
                 {activeMedia && (
                   <div className="now-playing">
-                    <h3>En cours</h3>
+                    <div className="np-eyebrow">En lecture</div>
                     <div className="np-title">{activeMedia.title}</div>
-                    {activeMedia.meta?.year && <div className="np-year">{activeMedia.meta.year}</div>}
+                    {activeMedia.meta?.year && (
+                      <div className="np-meta"><span>{activeMedia.meta.year}</span></div>
+                    )}
                   </div>
                 )}
               </aside>

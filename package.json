@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "express": "^4.21.1",
+    "lucide-react": "^1.14.0",
     "matroska-subtitles": "^3.3.2",
     "socket.io": "^4.8.1"
   },
