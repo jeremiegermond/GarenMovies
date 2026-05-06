@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getServerInfo: () => ipcRenderer.invoke('server:info'),
   getConfig: () => ipcRenderer.invoke('config:get'),
+  setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
   pickFolder: () => ipcRenderer.invoke('dialog:pick-folder'),
   scanFolder: (folder) => ipcRenderer.invoke('catalog:scan', folder),
   rescan: () => ipcRenderer.invoke('catalog:rescan'),

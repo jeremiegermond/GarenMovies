@@ -3,12 +3,23 @@ const path = require('path');
 const crypto = require('crypto');
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.webm', '.mov', '.m4v']);
+const SUB_EXTENSIONS = new Set(['.srt', '.vtt', '.ass']);
 
-// Categories:
-//   'catalogue' = movies stored on a remote server (phase 2 — empty for now)
-//   'stream'    = movies scanned from the host's local disk
-const media = new Map(); // id -> entry
-const sources = new Map(); // sourceKey -> { type, folder, category }
+const LANG_LABELS = {
+  fr: 'Français', fre: 'Français', fra: 'Français',
+  en: 'English', eng: 'English',
+  es: 'Español', spa: 'Español',
+  de: 'Deutsch', ger: 'Deutsch', deu: 'Deutsch',
+  it: 'Italiano', ita: 'Italiano',
+  pt: 'Português', por: 'Português',
+  ja: '日本語', jpn: '日本語',
+  zh: '中文', chi: '中文',
+  ar: 'العربية', ara: 'العربية',
+  ru: 'Русский', rus: 'Русский'
+};
+
+const media = new Map();
+const sources = new Map();
 
 function makeId(filePath) {
   return crypto.createHash('sha1').update(filePath).digest('hex').slice(0, 12);
@@ -17,8 +28,37 @@ function makeId(filePath) {
 function prettyTitle(filename) {
   return path.parse(filename).name
     .replace(/[._]+/g, ' ')
+    .replace(/\b(\d{3,4}p|x264|x265|h264|h265|hevc|bluray|brrip|dvdrip|web-?dl|hdrip)\b/gi, '')
+    .replace(/\b(20\d{2}|19\d{2})\b/g, (m) => ` (${m})`)
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function findSubsForVideo(videoBasename, allFiles, dir) {
+  const subs = [];
+  const baseLower = videoBasename.toLowerCase();
+  for (const fname of allFiles) {
+    const ext = path.extname(fname).toLowerCase();
+    if (!SUB_EXTENSIONS.has(ext)) continue;
+    const lower = fname.toLowerCase();
+    if (!lower.startsWith(baseLower)) continue;
+    const middle = fname.slice(videoBasename.length, fname.length - ext.length);
+    let lang = null;
+    if (middle === '') {
+      lang = null;
+    } else if (/^\.[a-z]{2,3}$/i.test(middle)) {
+      lang = middle.slice(1).toLowerCase();
+    } else {
+      continue;
+    }
+    subs.push({
+      lang: lang || 'und',
+      label: lang ? (LANG_LABELS[lang] || lang.toUpperCase()) : 'Sous-titres',
+      path: path.join(dir, fname),
+      ext: ext.slice(1)
+    });
+  }
+  return subs;
 }
 
 async function walkDir(dir, depth = 0, maxDepth = 4) {
@@ -30,37 +70,43 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
   } catch {
     return [];
   }
+
+  const fileNames = entries.filter(e => e.isFile()).map(e => e.name);
+
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       found.push(...await walkDir(full, depth + 1, maxDepth));
-    } else if (entry.isFile()) {
-      const ext = path.extname(entry.name).toLowerCase();
-      if (VIDEO_EXTENSIONS.has(ext)) {
-        try {
-          const stat = await fs.stat(full);
-          found.push({
-            id: makeId(full),
-            title: prettyTitle(entry.name),
-            category: 'stream',
-            source: {
-              type: 'local',
-              path: full,
-              size: stat.size,
-              mtime: stat.mtimeMs,
-              ext: ext.slice(1)
-            }
-          });
-        } catch { /* skip unreadable */ }
-      }
+      continue;
     }
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!VIDEO_EXTENSIONS.has(ext)) continue;
+    try {
+      const stat = await fs.stat(full);
+      const basename = path.parse(entry.name).name;
+      const subs = findSubsForVideo(basename, fileNames, dir);
+      found.push({
+        id: makeId(full),
+        title: prettyTitle(entry.name),
+        category: 'stream',
+        source: {
+          type: 'local',
+          path: full,
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          ext: ext.slice(1)
+        },
+        subs: subs.map((s, idx) => ({ idx, lang: s.lang, label: s.label, path: s.path, ext: s.ext })),
+        meta: null
+      });
+    } catch { /* skip */ }
   }
   return found;
 }
 
 async function scanFolder(folder) {
   const sourceKey = `local:${folder}`;
-  // Drop previous entries from this source so removed files disappear
   for (const [id, m] of media) {
     if (m.source.type === 'local' && m.source.path.startsWith(folder + path.sep)) {
       media.delete(id);
@@ -89,14 +135,16 @@ function getCatalog() {
   };
 }
 
-function getMedia(id) {
-  return media.get(id) || null;
+function getMedia(id) { return media.get(id) || null; }
+function getAllMedia() { return Array.from(media.values()); }
+function setMediaMeta(id, meta) {
+  const m = media.get(id);
+  if (m) m.meta = meta;
 }
-
 function getScanFolders() {
-  return Array.from(sources.values())
-    .filter(s => s.type === 'local-scan')
-    .map(s => s.folder);
+  return Array.from(sources.values()).filter(s => s.type === 'local-scan').map(s => s.folder);
 }
 
-module.exports = { scanFolder, clearLocalSources, getCatalog, getMedia, getScanFolders };
+module.exports = {
+  scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia, setMediaMeta, getScanFolders
+};

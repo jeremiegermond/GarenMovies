@@ -6,19 +6,8 @@ import Client from './pages/Client.jsx';
 export default function App() {
   const [screen, setScreen] = useState('home');
 
-  return (
-    <div className="app">
-      <div className="topbar">
-        <h1>GarenMovies</h1>
-        {screen !== 'home' && (
-          <button className="back-link" onClick={() => setScreen('home')}>← Retour</button>
-        )}
-      </div>
-      <div className="content">
-        {screen === 'home' && <Home onPick={setScreen} />}
-        {screen === 'host' && <Host />}
-        {screen === 'client' && <Client />}
-      </div>
-    </div>
-  );
+  if (screen === 'home') return <Home onPick={setScreen} />;
+  if (screen === 'host') return <Host onLeave={() => setScreen('home')} />;
+  if (screen === 'client') return <Client onLeave={() => setScreen('home')} />;
+  return null;
 }

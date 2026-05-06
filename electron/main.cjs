@@ -3,7 +3,9 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { startServer, getCatalog, scanFolder, getState, broadcastCatalog } = require('./server/server.cjs');
+const { getAllMedia } = require('./server/catalog.cjs');
 const tunnel = require('./server/tunnel.cjs');
+const metadata = require('./server/metadata.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -34,10 +36,10 @@ function saveConfig(cfg) {
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1400,
+    height: 880,
+    minWidth: 980,
+    minHeight: 640,
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -65,15 +67,36 @@ function getLanIPs() {
   return ips;
 }
 
+let enrichTimer = null;
+function scheduleBroadcast() {
+  if (enrichTimer) return;
+  enrichTimer = setTimeout(() => {
+    enrichTimer = null;
+    broadcastCatalog();
+  }, 1500);
+}
+
+async function enrichInBackground() {
+  if (!metadata.hasApiKey()) return;
+  const items = getAllMedia();
+  await metadata.enrichBatch(items, () => scheduleBroadcast());
+  broadcastCatalog();
+}
+
 app.whenReady().then(async () => {
   serverInfo = await startServer(SERVER_PORT);
-  await createWindow();
+  metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
 
   const cfg = loadConfig();
+  if (cfg.tmdbApiKey) metadata.setApiKey(cfg.tmdbApiKey);
+
+  await createWindow();
+
   if (cfg.scanFolder) {
     try {
       await scanFolder(cfg.scanFolder);
       broadcastCatalog();
+      enrichInBackground();
     } catch (e) {
       console.error('Auto-rescan failed:', e);
     }
@@ -103,6 +126,16 @@ ipcMain.handle('server:info', () => ({
 }));
 
 ipcMain.handle('config:get', () => loadConfig());
+ipcMain.handle('config:set', (_e, patch) => {
+  const cfg = loadConfig();
+  Object.assign(cfg, patch || {});
+  saveConfig(cfg);
+  if (patch && patch.tmdbApiKey !== undefined) {
+    metadata.setApiKey(patch.tmdbApiKey);
+    enrichInBackground();
+  }
+  return cfg;
+});
 
 ipcMain.handle('dialog:pick-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -119,6 +152,7 @@ ipcMain.handle('catalog:scan', async (_e, folder) => {
   cfg.scanFolder = folder;
   saveConfig(cfg);
   broadcastCatalog();
+  enrichInBackground();
   return entries;
 });
 
@@ -127,6 +161,7 @@ ipcMain.handle('catalog:rescan', async () => {
   if (!cfg.scanFolder) return [];
   const entries = await scanFolder(cfg.scanFolder);
   broadcastCatalog();
+  enrichInBackground();
   return entries;
 });
 

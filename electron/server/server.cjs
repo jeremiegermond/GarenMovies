@@ -3,6 +3,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { scanFolder, getCatalog, getMedia } = require('./catalog.cjs');
 const { streamMedia } = require('./streaming.cjs');
+const { getSubtitleAsVTT } = require('./subtitles.cjs');
 
 const state = {
   mediaId: null,
@@ -10,6 +11,9 @@ const state = {
   currentTime: 0,
   updatedAt: Date.now()
 };
+
+const chatHistory = [];
+const MAX_CHAT = 50;
 
 let hostSocketId = null;
 let io = null;
@@ -20,11 +24,27 @@ function projectedState() {
   return { ...state, currentTime: state.currentTime + elapsed };
 }
 
+function stripMedia(m) {
+  return {
+    id: m.id,
+    title: m.title,
+    category: m.category,
+    source: { type: m.source.type, ext: m.source.ext, size: m.source.size },
+    subs: (m.subs || []).map((s) => ({ idx: s.idx, lang: s.lang, label: s.label })),
+    meta: m.meta && !m.meta.notFound ? {
+      poster: m.meta.poster,
+      year: m.meta.year,
+      overview: m.meta.overview,
+      rating: m.meta.rating
+    } : null
+  };
+}
+
 function safeCatalog() {
   const { catalogue, stream } = getCatalog();
   return {
-    catalogue: catalogue.map(stripPath),
-    stream: stream.map(stripPath)
+    catalogue: catalogue.map(stripMedia),
+    stream: stream.map(stripMedia)
   };
 }
 
@@ -38,9 +58,7 @@ function broadcastCatalog() {
   io.emit('catalog', safeCatalog());
 }
 
-function getState() {
-  return projectedState();
-}
+function getState() { return projectedState(); }
 
 function startServer(port) {
   return new Promise((resolve, reject) => {
@@ -63,17 +81,37 @@ function startServer(port) {
       streamMedia(req, res, m);
     });
 
+    app.get('/api/subs/:mediaId/:idx.vtt', (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      if (!m) return res.status(404).end('Unknown media');
+      const idx = parseInt(req.params.idx, 10);
+      const sub = (m.subs || [])[idx];
+      if (!sub) return res.status(404).end('Unknown subtitle');
+      const vtt = getSubtitleAsVTT(sub);
+      if (!vtt) return res.status(415).end('Unsupported subtitle format');
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(vtt);
+    });
+
     const server = http.createServer(app);
     io = new Server(server, { cors: { origin: '*' }, maxHttpBufferSize: 1e6 });
 
     io.on('connection', (socket) => {
+      socket.data.nickname = 'Anonyme';
+
       socket.emit('state', projectedState());
       socket.emit('catalog', safeCatalog());
+      socket.emit('chat:history', chatHistory);
       broadcastViewers();
 
-      socket.on('hello', ({ role: requestedRole } = {}) => {
+      socket.on('hello', ({ role: requestedRole, nickname } = {}) => {
+        if (typeof nickname === 'string' && nickname.trim()) {
+          socket.data.nickname = nickname.trim().slice(0, 32);
+        }
         if (requestedRole === 'host' && hostSocketId === null) {
           hostSocketId = socket.id;
+          socket.data.isHost = true;
           socket.emit('role', { role: 'host' });
         } else {
           socket.emit('role', { role: 'client' });
@@ -103,6 +141,21 @@ function startServer(port) {
         socket.emit('catalog', safeCatalog());
       });
 
+      socket.on('chat:send', ({ text } = {}) => {
+        if (typeof text !== 'string') return;
+        const trimmed = text.trim().slice(0, 500);
+        if (!trimmed) return;
+        const msg = {
+          nickname: socket.data.nickname || 'Anonyme',
+          text: trimmed,
+          ts: Date.now(),
+          isHost: socket.id === hostSocketId
+        };
+        chatHistory.push(msg);
+        if (chatHistory.length > MAX_CHAT) chatHistory.shift();
+        io.emit('chat:message', msg);
+      });
+
       socket.on('disconnect', () => {
         if (socket.id === hostSocketId) {
           hostSocketId = null;
@@ -117,15 +170,6 @@ function startServer(port) {
     server.on('error', reject);
     server.listen(port, () => resolve({ port, server }));
   });
-}
-
-function stripPath(m) {
-  return {
-    id: m.id,
-    title: m.title,
-    category: m.category,
-    source: { type: m.source.type, ext: m.source.ext, size: m.source.size }
-  };
 }
 
 module.exports = { startServer, scanFolder, getCatalog, getState, broadcastCatalog };
