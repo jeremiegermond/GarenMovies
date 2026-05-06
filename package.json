@@ -1,0 +1,65 @@
+{
+  "name": "garenmovies",
+  "version": "0.1.0",
+  "description": "Watch-party desktop app — host movies locally, friends join via room code",
+  "main": "electron/main.cjs",
+  "author": "garenmovies",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k -n vite,electron -c blue,green \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "start": "electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.8.1",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.11",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "wait-on": "^8.0.1",
+    "cross-env": "^7.0.3"
+  },
+  "build": {
+    "appId": "com.garenmovies.app",
+    "productName": "GarenMovies",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/.cache",
+      "!**/.git",
+      "!**/.vscode",
+      "!**/release"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GarenMovies"
+    },
+    "asar": true
+  }
+}

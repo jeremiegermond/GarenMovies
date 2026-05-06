@@ -1,0 +1,337 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #181b22;
+  --panel-2: #20242d;
+  --border: #2a2f3a;
+  --text: #e6e8ec;
+  --muted: #8a93a4;
+  --accent: #6c8cff;
+  --accent-hover: #8aa3ff;
+  --danger: #ff6b6b;
+  --ok: #5fd07a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  font-family: inherit;
+  font-size: 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover:not(:disabled) {
+  background: var(--border);
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0f1115;
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+input {
+  font-family: inherit;
+  font-size: 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 8px;
+  outline: none;
+}
+input:focus {
+  border-color: var(--accent);
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.topbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.topbar .muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+}
+
+/* Home */
+.home {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+.home h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+.home .actions {
+  display: flex;
+  gap: 16px;
+}
+.home button {
+  padding: 16px 32px;
+  font-size: 16px;
+}
+
+/* Host / Client layouts */
+.workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  height: 100%;
+}
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+.sidebar h3 {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.room-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.room-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.room-card input { width: 100%; }
+.row {
+  display: flex;
+  gap: 8px;
+}
+.row > button { flex: 1; }
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--muted);
+}
+.badge.online {
+  background: rgba(95, 208, 122, 0.15);
+  color: var(--ok);
+  border: 1px solid rgba(95, 208, 122, 0.4);
+}
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.room-code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 16px;
+  font-weight: 600;
+  background: #0f1115;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+  user-select: all;
+}
+.viewers {
+  font-size: 13px;
+  color: var(--muted);
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Catalog */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.catalog-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.movie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.movie:hover { border-color: var(--accent); }
+.movie.active { border-color: var(--accent); background: rgba(108,140,255,0.1); }
+.movie .title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.movie .source {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Player */
+.player-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.player-wrap video {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+.player-empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 20px;
+}
+.join-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 320px;
+}
+.join-form label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.join-form .error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.scan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scan-form .row {
+  display: flex;
+  gap: 8px;
+}
+.scan-form .row input { flex: 1; min-width: 0; }
+.path-display {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.back-link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.back-link:hover { color: var(--text); }

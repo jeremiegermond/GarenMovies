@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+release/
+
+# Local config
+.env
+.env.local
+
+# Editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
