@@ -3,9 +3,10 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { startServer, getCatalog, scanFolder, getState, broadcastCatalog } = require('./server/server.cjs');
-const { getAllMedia } = require('./server/catalog.cjs');
+const { getAllMedia, addEmbeddedSubsToMedia } = require('./server/catalog.cjs');
 const tunnel = require('./server/tunnel.cjs');
 const metadata = require('./server/metadata.cjs');
+const subtitles = require('./server/subtitles.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -67,25 +68,53 @@ function getLanIPs() {
   return ips;
 }
 
-let enrichTimer = null;
+let broadcastTimer = null;
 function scheduleBroadcast() {
-  if (enrichTimer) return;
-  enrichTimer = setTimeout(() => {
-    enrichTimer = null;
+  if (broadcastTimer) return;
+  broadcastTimer = setTimeout(() => {
+    broadcastTimer = null;
     broadcastCatalog();
   }, 1500);
 }
 
-async function enrichInBackground() {
-  if (!metadata.hasApiKey()) return;
-  const items = getAllMedia();
-  await metadata.enrichBatch(items, () => scheduleBroadcast());
-  broadcastCatalog();
+let processing = false;
+async function processInBackground(items) {
+  if (processing) return;
+  processing = true;
+  try {
+    await Promise.all([
+      metadata.hasApiKey()
+        ? metadata.enrichBatch(items, () => scheduleBroadcast())
+        : Promise.resolve(),
+      probeAllMKVs(items)
+    ]);
+  } finally {
+    processing = false;
+    broadcastCatalog();
+  }
+}
+
+async function probeAllMKVs(items) {
+  if (!subtitles.isMkvSupported()) return;
+  for (const item of items) {
+    if (item.source.ext !== 'mkv') continue;
+    if (item.subs.some((s) => s.type === 'embedded')) continue;
+    try {
+      const tracks = await subtitles.probeMkv(item.source.path);
+      if (tracks.length > 0) {
+        addEmbeddedSubsToMedia(item.id, tracks);
+        scheduleBroadcast();
+      }
+    } catch (e) {
+      console.error('MKV probe failed for', item.title, e.message);
+    }
+  }
 }
 
 app.whenReady().then(async () => {
   serverInfo = await startServer(SERVER_PORT);
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
+  subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
 
   const cfg = loadConfig();
   if (cfg.tmdbApiKey) metadata.setApiKey(cfg.tmdbApiKey);
@@ -96,7 +125,7 @@ app.whenReady().then(async () => {
     try {
       await scanFolder(cfg.scanFolder);
       broadcastCatalog();
-      enrichInBackground();
+      processInBackground(getAllMedia());
     } catch (e) {
       console.error('Auto-rescan failed:', e);
     }
@@ -132,7 +161,7 @@ ipcMain.handle('config:set', (_e, patch) => {
   saveConfig(cfg);
   if (patch && patch.tmdbApiKey !== undefined) {
     metadata.setApiKey(patch.tmdbApiKey);
-    enrichInBackground();
+    processInBackground(getAllMedia());
   }
   return cfg;
 });
@@ -152,7 +181,7 @@ ipcMain.handle('catalog:scan', async (_e, folder) => {
   cfg.scanFolder = folder;
   saveConfig(cfg);
   broadcastCatalog();
-  enrichInBackground();
+  processInBackground(getAllMedia());
   return entries;
 });
 
@@ -161,7 +190,7 @@ ipcMain.handle('catalog:rescan', async () => {
   if (!cfg.scanFolder) return [];
   const entries = await scanFolder(cfg.scanFolder);
   broadcastCatalog();
-  enrichInBackground();
+  processInBackground(getAllMedia());
   return entries;
 });
 

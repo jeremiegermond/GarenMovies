@@ -17,19 +17,20 @@
   },
   "dependencies": {
     "express": "^4.21.1",
+    "matroska-subtitles": "^3.3.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io-client": "^4.8.1",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
     "vite": "^5.4.11",
-    "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.0",
-    "wait-on": "^8.0.1",
-    "cross-env": "^7.0.3"
+    "wait-on": "^8.0.1"
   },
   "build": {
     "appId": "com.garenmovies.app",
@@ -48,7 +49,12 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },

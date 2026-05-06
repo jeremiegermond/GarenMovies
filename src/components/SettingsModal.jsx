@@ -2,20 +2,30 @@ import { useEffect, useState } from 'react';
 
 export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [tmdbKey, setTmdbKey] = useState('');
+  const [originalKey, setOriginalKey] = useState('');
   const [nick, setNick] = useState(nickname || '');
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     window.electronAPI.getConfig().then((cfg) => {
-      setTmdbKey(cfg.tmdbApiKey || '');
+      const key = cfg.tmdbApiKey || '';
+      setTmdbKey(key);
+      setOriginalKey(key);
       setLoading(false);
     });
   }, []);
 
+  const hasSavedKey = !!originalKey;
+  const keyChanged = tmdbKey.trim() !== originalKey;
+  const nickChanged = nick.trim() && nick !== nickname;
+
   async function save() {
-    await window.electronAPI.setConfig({ tmdbApiKey: tmdbKey.trim() });
-    if (nick.trim() && nick !== nickname) onNicknameChange(nick.trim());
+    const cleanKey = tmdbKey.trim();
+    await window.electronAPI.setConfig({ tmdbApiKey: cleanKey });
+    setOriginalKey(cleanKey);
+    if (nickChanged) onNicknameChange(nick.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -39,24 +49,37 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
           </div>
 
           <div className="field">
-            <label>Clé API TMDB (pour les affiches de films)</label>
-            <input
-              type="text"
-              value={loading ? 'Chargement…' : tmdbKey}
-              onChange={(e) => setTmdbKey(e.target.value)}
-              placeholder="ex: 1234abcd5678ef..."
-              disabled={loading}
-            />
+            <label>
+              Clé API TMDB (pour les affiches)
+              {hasSavedKey && !keyChanged && <span className="badge ok-badge">✓ ENREGISTRÉE</span>}
+            </label>
+            <div className="key-input-row">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={loading ? '' : tmdbKey}
+                onChange={(e) => setTmdbKey(e.target.value)}
+                placeholder={loading ? 'Chargement…' : 'ex: 1234abcd5678ef...'}
+                disabled={loading}
+              />
+              <button onClick={() => setShowKey((v) => !v)} type="button">
+                {showKey ? 'Masquer' : 'Afficher'}
+              </button>
+            </div>
             <div className="hint">
               Crée un compte gratuit sur <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">themoviedb.org</a>,
-              demande une clé API (v3 auth, c'est instantané) et colle-la ici. Sans clé, les films s'afficheront sans poster.
+              demande une clé API (v3 auth, instantané) et colle-la ici.
+            </div>
+            <div className="hint accent">
+              💡 <b>Ta clé est utilisée seulement quand tu héberges.</b> Tes amis n'ont pas besoin de leur propre clé — ils reçoivent les affiches directement de ton serveur.
             </div>
           </div>
         </div>
         <div className="modal-footer">
           {saved && <span className="saved">✓ Enregistré</span>}
           <button onClick={onClose}>Fermer</button>
-          <button className="primary" onClick={save} disabled={loading}>Enregistrer</button>
+          <button className="primary" onClick={save} disabled={loading || (!keyChanged && !nickChanged)}>
+            Enregistrer
+          </button>
         </div>
       </div>
     </div>

@@ -4,7 +4,7 @@ const path = require('path');
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 
-const cache = new Map(); // titleKey -> { poster, year, overview, tmdbId } | { notFound: true }
+const cache = new Map();
 let apiKey = null;
 let cacheFile = null;
 
@@ -35,10 +35,35 @@ function makeKey(title) {
 }
 
 function parseTitle(rawTitle) {
-  // "Inception (2010)" -> { name: "Inception", year: 2010 }
-  const m = rawTitle.match(/^(.+?)\s*\((\d{4})\)\s*$/);
-  if (m) return { name: m[1].trim(), year: m[2] };
-  return { name: rawTitle.trim(), year: null };
+  // TV episode: "Show Name S01E01" or "Show Name s1e1"
+  let m = rawTitle.match(/^(.+?)\s+s(\d{1,2})e(\d{1,2})\b/i);
+  if (m) {
+    return { name: m[1].trim(), season: +m[2], episode: +m[3], isTV: true };
+  }
+  // TV alt: "Show Name 1x01"
+  m = rawTitle.match(/^(.+?)\s+(\d{1,2})x(\d{1,2})\b/i);
+  if (m) {
+    return { name: m[1].trim(), season: +m[2], episode: +m[3], isTV: true };
+  }
+  // Movie with year: "Title (2010)"
+  m = rawTitle.match(/^(.+?)\s*\((\d{4})\)\s*$/);
+  if (m) return { name: m[1].trim(), year: m[2], isTV: false };
+  return { name: rawTitle.trim(), isTV: false };
+}
+
+async function searchTMDB(endpoint, query, extras = {}) {
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    query,
+    language: 'fr-FR',
+    include_adult: 'false',
+    ...extras
+  });
+  const res = await fetch(`${TMDB_BASE}${endpoint}?${params}`, {
+    headers: { 'Accept': 'application/json' }
+  });
+  if (!res.ok) return { error: `HTTP ${res.status}` };
+  return await res.json();
 }
 
 async function lookupTitle(rawTitle) {
@@ -46,46 +71,58 @@ async function lookupTitle(rawTitle) {
   if (cache.has(key)) return cache.get(key);
   if (!apiKey) return null;
 
-  const { name, year } = parseTitle(rawTitle);
-  const params = new URLSearchParams({
-    api_key: apiKey,
-    query: name,
-    language: 'fr-FR',
-    include_adult: 'false'
-  });
-  if (year) params.set('year', year);
+  const parsed = parseTitle(rawTitle);
 
-  try {
-    const res = await fetch(`${TMDB_BASE}/search/movie?${params}`, {
-      headers: { 'Accept': 'application/json' }
-    });
-    if (!res.ok) {
-      const result = { notFound: true, error: `HTTP ${res.status}` };
-      cache.set(key, result);
-      return result;
+  let data;
+  if (parsed.isTV) {
+    data = await searchTMDB('/search/tv', parsed.name);
+  } else {
+    const extras = parsed.year ? { year: parsed.year } : {};
+    data = await searchTMDB('/search/movie', parsed.name, extras);
+  }
+
+  if (!data || data.error) return null;
+
+  if (!data.results || data.results.length === 0) {
+    // Fallback: try /search/multi for ambiguous cases
+    const multi = await searchTMDB('/search/multi', parsed.name);
+    if (multi.results && multi.results.length > 0) {
+      const top = multi.results.find(r => r.media_type === 'movie' || r.media_type === 'tv');
+      if (top) {
+        const result = buildResult(top, top.media_type);
+        cache.set(key, result);
+        persistCache();
+        return result;
+      }
     }
-    const data = await res.json();
-    if (!data.results || data.results.length === 0) {
-      const result = { notFound: true };
-      cache.set(key, result);
-      persistCache();
-      return result;
-    }
-    const top = data.results[0];
-    const result = {
-      tmdbId: top.id,
-      title: top.title,
-      poster: top.poster_path ? `${TMDB_IMG}${top.poster_path}` : null,
-      year: top.release_date ? top.release_date.slice(0, 4) : null,
-      overview: top.overview || null,
-      rating: top.vote_average || null
-    };
+    const result = { notFound: true };
     cache.set(key, result);
     persistCache();
     return result;
-  } catch (e) {
-    return null; // transient — don't cache failures
   }
+
+  const top = data.results[0];
+  const result = buildResult(top, parsed.isTV ? 'tv' : 'movie');
+  if (parsed.season) result.season = parsed.season;
+  if (parsed.episode) result.episode = parsed.episode;
+  cache.set(key, result);
+  persistCache();
+  return result;
+}
+
+function buildResult(top, type) {
+  const isTV = type === 'tv';
+  return {
+    tmdbId: top.id,
+    title: isTV ? (top.name || top.original_name) : (top.title || top.original_title),
+    poster: top.poster_path ? `${TMDB_IMG}${top.poster_path}` : null,
+    year: isTV
+      ? (top.first_air_date ? top.first_air_date.slice(0, 4) : null)
+      : (top.release_date ? top.release_date.slice(0, 4) : null),
+    overview: top.overview || null,
+    rating: top.vote_average || null,
+    type
+  };
 }
 
 let enrichingPromise = null;
@@ -104,7 +141,7 @@ async function enrichBatch(items, onProgress) {
       } else if (meta && meta.notFound) {
         item.meta = { notFound: true };
       }
-      await new Promise((r) => setTimeout(r, 200)); // throttle
+      await new Promise((r) => setTimeout(r, 200));
     }
     return changed;
   })();

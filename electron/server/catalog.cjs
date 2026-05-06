@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -28,35 +29,79 @@ function makeId(filePath) {
 function prettyTitle(filename) {
   return path.parse(filename).name
     .replace(/[._]+/g, ' ')
-    .replace(/\b(\d{3,4}p|x264|x265|h264|h265|hevc|bluray|brrip|dvdrip|web-?dl|hdrip)\b/gi, '')
-    .replace(/\b(20\d{2}|19\d{2})\b/g, (m) => ` (${m})`)
+    .replace(/\b(\d{3,4}p|x264|x265|h264|h265|hevc|10bit|bluray|brrip|dvdrip|web-?dl|hdrip|webrip|amzn|nf|hmax|atmos|dts|aac|ddp?5\.1|ac3)\b/gi, '')
+    .replace(/\b\[[^\]]+\]/g, '') // strip [GROUP] tags
+    .replace(/-[A-Z0-9]+$/i, '')   // strip trailing -RELEASE-GROUP
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function findSubsForVideo(videoBasename, allFiles, dir) {
+function extractEpisodeKey(name) {
+  const m = name.toLowerCase().match(/\bs(\d{1,2})e(\d{1,2})\b/);
+  if (m) return `s${m[1].padStart(2, '0')}e${m[2].padStart(2, '0')}`;
+  const alt = name.toLowerCase().match(/\b(\d{1,2})x(\d{1,2})\b/);
+  if (alt) return `s${alt[1].padStart(2, '0')}e${alt[2].padStart(2, '0')}`;
+  return null;
+}
+
+function inferLangFromName(subBasename, videoBasename) {
+  // Take what differs between sub basename and video basename, look for lang code
+  const lower = subBasename.toLowerCase();
+  // Common patterns: name.fr.srt, name.fr-FR.srt, name.eng.forced.srt
+  const langCandidates = lower.match(/\.([a-z]{2,3})(?:[\.\-_]|$)/g) || [];
+  for (const cand of langCandidates) {
+    const code = cand.replace(/[\.\-_]/g, '');
+    if (LANG_LABELS[code]) return code;
+  }
+  return null;
+}
+
+function findSidecarSubs(videoFileName, allFiles, dir) {
   const subs = [];
-  const baseLower = videoBasename.toLowerCase();
+  const videoBasename = path.parse(videoFileName).name.toLowerCase();
+  const epKey = extractEpisodeKey(videoBasename);
+
   for (const fname of allFiles) {
     const ext = path.extname(fname).toLowerCase();
     if (!SUB_EXTENSIONS.has(ext)) continue;
-    const lower = fname.toLowerCase();
-    if (!lower.startsWith(baseLower)) continue;
-    const middle = fname.slice(videoBasename.length, fname.length - ext.length);
+
+    const subBasename = path.parse(fname).name.toLowerCase();
+    let matched = false;
     let lang = null;
-    if (middle === '') {
-      lang = null;
-    } else if (/^\.[a-z]{2,3}$/i.test(middle)) {
-      lang = middle.slice(1).toLowerCase();
-    } else {
-      continue;
+
+    // Strategy 1: exact basename match (with optional .lang suffix)
+    if (subBasename === videoBasename) {
+      matched = true;
+    } else if (subBasename.startsWith(videoBasename + '.')) {
+      const suffix = subBasename.slice(videoBasename.length + 1);
+      const langMatch = suffix.match(/^([a-z]{2,3})(?:[\.\-_]|$)/);
+      if (langMatch && LANG_LABELS[langMatch[1]]) {
+        matched = true;
+        lang = langMatch[1];
+      } else if (/^[a-z]{2,3}$/.test(suffix)) {
+        matched = true;
+        lang = suffix;
+      }
     }
-    subs.push({
-      lang: lang || 'und',
-      label: lang ? (LANG_LABELS[lang] || lang.toUpperCase()) : 'Sous-titres',
-      path: path.join(dir, fname),
-      ext: ext.slice(1)
-    });
+
+    // Strategy 2: TV episode key match (Show.S01E01.foo.mkv + Show.S01E01.fr.srt)
+    if (!matched && epKey) {
+      const subEpKey = extractEpisodeKey(subBasename);
+      if (subEpKey === epKey) {
+        matched = true;
+        lang = inferLangFromName(subBasename, videoBasename);
+      }
+    }
+
+    if (matched) {
+      subs.push({
+        type: 'sidecar',
+        lang: lang || 'und',
+        label: lang ? (LANG_LABELS[lang] || lang.toUpperCase()) : 'Sous-titres',
+        path: path.join(dir, fname),
+        ext: ext.slice(1)
+      });
+    }
   }
   return subs;
 }
@@ -71,7 +116,7 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
     return [];
   }
 
-  const fileNames = entries.filter(e => e.isFile()).map(e => e.name);
+  const fileNames = entries.filter((e) => e.isFile()).map((e) => e.name);
 
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
@@ -84,8 +129,8 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
     if (!VIDEO_EXTENSIONS.has(ext)) continue;
     try {
       const stat = await fs.stat(full);
-      const basename = path.parse(entry.name).name;
-      const subs = findSubsForVideo(basename, fileNames, dir);
+      const subsRaw = findSidecarSubs(entry.name, fileNames, dir);
+      const subs = subsRaw.map((s, idx) => ({ idx, ...s }));
       found.push({
         id: makeId(full),
         title: prettyTitle(entry.name),
@@ -97,7 +142,7 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
           mtime: stat.mtimeMs,
           ext: ext.slice(1)
         },
-        subs: subs.map((s, idx) => ({ idx, lang: s.lang, label: s.label, path: s.path, ext: s.ext })),
+        subs,
         meta: null
       });
     } catch { /* skip */ }
@@ -130,8 +175,8 @@ function clearLocalSources() {
 function getCatalog() {
   const all = Array.from(media.values()).sort((a, b) => a.title.localeCompare(b.title));
   return {
-    catalogue: all.filter(m => m.category === 'catalogue'),
-    stream: all.filter(m => m.category === 'stream')
+    catalogue: all.filter((m) => m.category === 'catalogue'),
+    stream: all.filter((m) => m.category === 'stream')
   };
 }
 
@@ -141,10 +186,28 @@ function setMediaMeta(id, meta) {
   const m = media.get(id);
   if (m) m.meta = meta;
 }
+function addEmbeddedSubsToMedia(mediaId, tracks) {
+  const m = media.get(mediaId);
+  if (!m) return;
+  let nextIdx = m.subs.length;
+  for (const t of tracks) {
+    if (m.subs.some((s) => s.type === 'embedded' && s.trackNumber === t.number)) continue;
+    const lang = t.language || 'und';
+    m.subs.push({
+      idx: nextIdx++,
+      type: 'embedded',
+      lang,
+      label: t.name || (lang !== 'und' ? (LANG_LABELS[lang] || lang.toUpperCase()) : `Piste #${t.number}`),
+      trackNumber: t.number,
+      codec: t.type
+    });
+  }
+}
 function getScanFolders() {
-  return Array.from(sources.values()).filter(s => s.type === 'local-scan').map(s => s.folder);
+  return Array.from(sources.values()).filter((s) => s.type === 'local-scan').map((s) => s.folder);
 }
 
 module.exports = {
-  scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia, setMediaMeta, getScanFolders
+  scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia,
+  setMediaMeta, addEmbeddedSubsToMedia, getScanFolders, LANG_LABELS
 };

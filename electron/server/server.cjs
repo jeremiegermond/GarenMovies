@@ -3,7 +3,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { scanFolder, getCatalog, getMedia } = require('./catalog.cjs');
 const { streamMedia } = require('./streaming.cjs');
-const { getSubtitleAsVTT } = require('./subtitles.cjs');
+const subtitles = require('./subtitles.cjs');
 
 const state = {
   mediaId: null,
@@ -30,12 +30,19 @@ function stripMedia(m) {
     title: m.title,
     category: m.category,
     source: { type: m.source.type, ext: m.source.ext, size: m.source.size },
-    subs: (m.subs || []).map((s) => ({ idx: s.idx, lang: s.lang, label: s.label })),
+    subs: (m.subs || []).map((s) => ({
+      idx: s.idx,
+      lang: s.lang,
+      label: s.label,
+      type: s.type,
+      embedded: s.type === 'embedded'
+    })),
     meta: m.meta && !m.meta.notFound ? {
       poster: m.meta.poster,
       year: m.meta.year,
       overview: m.meta.overview,
-      rating: m.meta.rating
+      rating: m.meta.rating,
+      type: m.meta.type
     } : null
   };
 }
@@ -81,17 +88,28 @@ function startServer(port) {
       streamMedia(req, res, m);
     });
 
-    app.get('/api/subs/:mediaId/:idx.vtt', (req, res) => {
+    app.get('/api/subs/:mediaId/:idx.vtt', async (req, res) => {
       const m = getMedia(req.params.mediaId);
       if (!m) return res.status(404).end('Unknown media');
       const idx = parseInt(req.params.idx, 10);
       const sub = (m.subs || [])[idx];
       if (!sub) return res.status(404).end('Unknown subtitle');
-      const vtt = getSubtitleAsVTT(sub);
-      if (!vtt) return res.status(415).end('Unsupported subtitle format');
-      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.send(vtt);
+
+      try {
+        let vtt = null;
+        if (sub.type === 'sidecar') {
+          vtt = subtitles.getSidecarAsVTT(sub);
+        } else if (sub.type === 'embedded') {
+          vtt = await subtitles.getEmbeddedAsVTT(m, sub);
+        }
+        if (!vtt) return res.status(415).end('Unsupported subtitle format');
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.send(vtt);
+      } catch (e) {
+        console.error('Subtitle error:', e);
+        res.status(500).end(`Subtitle extraction failed: ${e.message}`);
+      }
     });
 
     const server = http.createServer(app);
