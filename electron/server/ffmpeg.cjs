@@ -15,10 +15,18 @@ const LANG_LABELS = {
   ru: 'Русский', rus: 'Русский'
 };
 
+// Audio codecs that browsers (Chromium/Electron) can decode raw, without remux.
+// AC-3, EAC-3, DTS, TrueHD, etc. are NOT in this list — they need transcoding.
+const RAW_PLAYABLE_AUDIO = new Set([
+  'aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le'
+]);
+
+// Video codecs requiring the hvc1 tag in MP4 to play in browsers
+const HEVC_CODECS = new Set(['hevc', 'h265']);
+
 let ffmpegPath = null;
 let ffprobePath = null;
 try {
-  // Both paths need .replace for asar.unpacked when packaged
   ffmpegPath = require('ffmpeg-static');
   if (ffmpegPath) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
 } catch { /* optional */ }
@@ -29,6 +37,14 @@ try {
 
 function isAvailable() {
   return !!ffmpegPath && !!ffprobePath && fs.existsSync(ffmpegPath) && fs.existsSync(ffprobePath);
+}
+
+function isAudioRawPlayable(codec) {
+  return RAW_PLAYABLE_AUDIO.has(String(codec || '').toLowerCase());
+}
+
+function isHEVC(codec) {
+  return HEVC_CODECS.has(String(codec || '').toLowerCase());
 }
 
 function formatAudioLabel(stream) {
@@ -43,90 +59,86 @@ function formatAudioLabel(stream) {
   return parts.join(' · ') || 'Audio';
 }
 
-function probeAudioTracks(filePath) {
-  if (!isAvailable()) return Promise.resolve([]);
+function spawnProbe(args) {
   return new Promise((resolve) => {
-    const proc = spawn(ffprobePath, [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_streams',
-      '-select_streams', 'a',
-      filePath
-    ], { windowsHide: true });
+    const proc = spawn(ffprobePath, args, { windowsHide: true });
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d) => { stdout += d.toString(); });
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('exit', (code) => {
-      if (code !== 0) {
-        console.warn('[ffprobe] audio probe exit', code, stderr.slice(-200));
-        return resolve([]);
-      }
-      try {
-        const data = JSON.parse(stdout);
-        const streams = (data.streams || []);
-        const tracks = streams.map((s, idx) => ({
-          idx,
-          ffmpegMapIdx: idx,
-          streamIndex: s.index,
-          lang: (s.tags?.language || 'und').toLowerCase(),
-          label: s.tags?.title || formatAudioLabel(s),
-          codec: s.codec_name,
-          channels: s.channels,
-          channelLayout: s.channel_layout,
-          isDefault: s.disposition?.default === 1
-        }));
-        resolve(tracks);
-      } catch (e) {
-        console.warn('[ffprobe] parse error', e.message);
-        resolve([]);
-      }
-    });
-    proc.on('error', (e) => {
-      console.warn('[ffprobe] spawn error', e.message);
-      resolve([]);
-    });
-    setTimeout(() => { try { proc.kill(); } catch {} resolve([]); }, 30000);
+    proc.on('exit', (code) => resolve({ code, stdout, stderr }));
+    proc.on('error', (e) => resolve({ code: -1, stdout: '', stderr: e.message }));
+    setTimeout(() => { try { proc.kill(); } catch {} resolve({ code: -2, stdout, stderr: 'timeout' }); }, 30000);
   });
+}
+
+async function probeFile(filePath) {
+  if (!isAvailable()) return null;
+  const r = await spawnProbe([
+    '-v', 'quiet',
+    '-print_format', 'json',
+    '-show_format',
+    '-show_streams',
+    filePath
+  ]);
+  if (r.code !== 0) {
+    console.warn('[ffprobe] file probe exit', r.code, r.stderr.slice(-200));
+    return null;
+  }
+  let data;
+  try { data = JSON.parse(r.stdout); } catch { return null; }
+
+  const streams = data.streams || [];
+  const videoStream = streams.find((s) => s.codec_type === 'video');
+  const audioStreams = streams.filter((s) => s.codec_type === 'audio');
+
+  const audioTracks = audioStreams.map((s, idx) => ({
+    idx,
+    streamIndex: s.index,
+    lang: (s.tags?.language || 'und').toLowerCase(),
+    label: s.tags?.title || formatAudioLabel(s),
+    codec: s.codec_name,
+    channels: s.channels,
+    channelLayout: s.channel_layout,
+    isDefault: s.disposition?.default === 1,
+    rawPlayable: isAudioRawPlayable(s.codec_name)
+  }));
+
+  return {
+    duration: parseFloat(data.format?.duration) || 0,
+    videoCodec: videoStream?.codec_name || null,
+    videoProfile: videoStream?.profile || null,
+    audioTracks
+  };
+}
+
+function probeAudioTracks(filePath) {
+  return probeFile(filePath).then((info) => info?.audioTracks || []);
 }
 
 function probeDuration(filePath) {
-  if (!isAvailable()) return Promise.resolve(0);
-  return new Promise((resolve) => {
-    const proc = spawn(ffprobePath, [
-      '-v', 'quiet',
-      '-show_entries', 'format=duration',
-      '-of', 'default=nokey=1:noprint_wrappers=1',
-      filePath
-    ], { windowsHide: true });
-    let stdout = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.on('exit', () => resolve(parseFloat(stdout.trim()) || 0));
-    proc.on('error', () => resolve(0));
-    setTimeout(() => { try { proc.kill(); } catch {} resolve(0); }, 15000);
-  });
+  return probeFile(filePath).then((info) => info?.duration || 0);
 }
 
-function remuxWithAudio(inputPath, audioIdx, outputPath, onProgress) {
+function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
+  const args = ['-y', '-i', inputPath, '-map', '0:v:0', '-map', `0:a:${audioIdx}`];
+  // Video copy + HEVC tag if needed (so MP4 plays in browsers)
+  args.push('-c:v', 'copy');
+  if (options.videoTag) args.push('-tag:v', options.videoTag);
+  // Audio: re-encode to AAC for max compat
+  args.push('-c:a', 'aac', '-b:a', '192k');
+  args.push('-movflags', '+faststart');
+  args.push('-progress', 'pipe:2', '-nostats');
+  args.push(outputPath);
+  return args;
+}
+
+function remuxWithAudio(inputPath, audioIdx, outputPath, options = {}, onProgress) {
   if (!isAvailable()) return Promise.reject(new Error('ffmpeg unavailable'));
   return new Promise((resolve, reject) => {
-    // Make sure output dir exists
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
-    const args = [
-      '-y',
-      '-i', inputPath,
-      '-map', '0:v:0',
-      '-map', `0:a:${audioIdx}`,
-      '-c:v', 'copy',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-movflags', '+faststart',
-      '-progress', 'pipe:2',
-      '-nostats',
-      outputPath
-    ];
-
+    const args = buildRemuxArgs(inputPath, audioIdx, outputPath, options);
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
     let stderrTail = '';
 
@@ -159,6 +171,9 @@ function getFfprobePath() { return ffprobePath; }
 
 module.exports = {
   isAvailable,
+  isAudioRawPlayable,
+  isHEVC,
+  probeFile,
   probeAudioTracks,
   probeDuration,
   remuxWithAudio,

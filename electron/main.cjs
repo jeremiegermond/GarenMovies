@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { startServer, getCatalog, scanFolder, getState, broadcastCatalog } = require('./server/server.cjs');
-const { getAllMedia, addEmbeddedSubsToMedia, setAudioTracksForMedia } = require('./server/catalog.cjs');
+const { getAllMedia, addEmbeddedSubsToMedia, setMediaProbeInfo } = require('./server/catalog.cjs');
 const tunnel = require('./server/tunnel.cjs');
 const metadata = require('./server/metadata.cjs');
 const subtitles = require('./server/subtitles.cjs');
@@ -116,11 +116,11 @@ async function probeAllMKVs(items) {
 async function probeAllAudioTracks(items) {
   if (!ffmpeg.isAvailable()) return;
   for (const item of items) {
-    if (item.audioTracks && item.audioTracks.length > 0) continue;
+    if (item.videoCodec || (item.audioTracks && item.audioTracks.length > 0)) continue;
     try {
-      const tracks = await ffmpeg.probeAudioTracks(item.source.path);
-      if (tracks.length > 0) {
-        setAudioTracksForMedia(item.id, tracks);
+      const info = await ffmpeg.probeFile(item.source.path);
+      if (info && (info.audioTracks?.length > 0 || info.videoCodec)) {
+        setMediaProbeInfo(item.id, info);
         scheduleBroadcast();
       }
     } catch (e) {

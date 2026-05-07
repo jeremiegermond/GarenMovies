@@ -50,8 +50,10 @@ function stripMedia(m) {
       label: t.label,
       codec: t.codec,
       channels: t.channels,
-      isDefault: !!t.isDefault
+      isDefault: !!t.isDefault,
+      rawPlayable: !!t.rawPlayable
     })),
+    videoCodec: m.videoCodec || null,
     meta: m.meta && !m.meta.notFound ? {
       poster: m.meta.poster,
       year: m.meta.year,
@@ -108,13 +110,18 @@ async function startRemuxJob(media, audioIdx) {
     return job;
   }
 
-  const job = { status: 'running', progress: 0, duration: 0, startedAt: Date.now() };
+  const job = { status: 'running', progress: 0, duration: media.duration || 0, startedAt: Date.now() };
   remuxJobs.set(key, job);
 
-  // Probe duration so we can compute %
-  ffmpeg.probeDuration(media.source.path).then((d) => { job.duration = d || 0; });
+  if (!job.duration) {
+    ffmpeg.probeDuration(media.source.path).then((d) => { job.duration = d || 0; });
+  }
 
-  ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, (sec) => {
+  // Add HEVC tag for browsers that need it to decode HEVC in MP4
+  const videoTag = ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
+  const opts = videoTag ? { videoTag } : {};
+
+  ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, opts, (sec) => {
     job.progress = sec;
   }).then(() => {
     job.status = 'ready';
@@ -154,27 +161,39 @@ function startServer(port, opts = {}) {
       const m = getMedia(req.params.id);
       if (!m) return res.status(404).end('Unknown media');
       const audio = req.query.audio != null ? parseInt(req.query.audio, 10) : null;
-      if (audio != null && audio !== 0) {
-        const cachedPath = audioCachePath(m.id, audio);
-        if (cachedPath && fs.existsSync(cachedPath)) {
-          // Stream the remuxed file with full range support
-          return streamMedia(req, res, {
-            source: { type: 'local', path: cachedPath, ext: 'mp4' }
-          });
-        }
-        return res.status(409).end('Audio track not yet prepared — POST /api/audio/prepare first');
+
+      // No query → raw file (browser plays first audio track natively)
+      if (audio == null) return streamMedia(req, res, m);
+
+      // ?audio=0 + track 0 raw-playable → still serve raw, no remux needed
+      if (audio === 0 && m.audioTracks?.[0]?.rawPlayable) {
+        return streamMedia(req, res, m);
       }
-      streamMedia(req, res, m);
+
+      // Otherwise we need the cached remuxed file
+      const cachedPath = audioCachePath(m.id, audio);
+      if (cachedPath && fs.existsSync(cachedPath)) {
+        return streamMedia(req, res, {
+          source: { type: 'local', path: cachedPath, ext: 'mp4' }
+        });
+      }
+      return res.status(409).end('Audio track not yet prepared — POST /api/audio/prepare first');
     });
 
     app.post('/api/audio/prepare', async (req, res) => {
       const { mediaId, audioIdx } = req.body || {};
       const m = getMedia(mediaId);
       if (!m) return res.status(404).json({ error: 'Unknown media' });
-      if (audioIdx == null || audioIdx === 0) return res.json({ status: 'ready' });
+      if (audioIdx == null) return res.status(400).json({ error: 'audioIdx required' });
+
+      const idx = parseInt(audioIdx, 10);
+      // Track 0 with raw-playable codec needs no remux
+      if (idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
+        return res.json({ status: 'ready', noRemux: true });
+      }
       if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
       try {
-        const job = await startRemuxJob(m, parseInt(audioIdx, 10));
+        const job = await startRemuxJob(m, idx);
         res.json({
           status: job.status,
           progress: job.progress,
@@ -189,7 +208,10 @@ function startServer(port, opts = {}) {
     app.get('/api/audio/status/:mediaId/:audioIdx', (req, res) => {
       const audioIdx = parseInt(req.params.audioIdx, 10);
       const mediaId = req.params.mediaId;
-      if (audioIdx === 0) return res.json({ status: 'ready' });
+      const m = getMedia(mediaId);
+      if (audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
+        return res.json({ status: 'ready', noRemux: true });
+      }
       const cachedPath = audioCachePath(mediaId, audioIdx);
       if (cachedPath && fs.existsSync(cachedPath)) return res.json({ status: 'ready' });
       const job = remuxJobs.get(jobKey(mediaId, audioIdx));

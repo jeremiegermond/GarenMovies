@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { Captions, Loader2, Check, Volume2 } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle } from 'lucide-react';
 
 const SYNC_THRESHOLD = 1.0;
 
-function buildStreamUrl(baseUrl, audioIdx) {
+function isTrackRawPlayable(track) {
+  // Treat unknown (not yet probed) as playable so we don't block initial render
+  return !track || track.rawPlayable !== false;
+}
+
+function buildStreamUrl(baseUrl, audioIdx, audioTracks) {
   if (!baseUrl) return null;
-  if (audioIdx == null || audioIdx === 0) return baseUrl;
+  // Track 0 + raw-playable codec → no audio query, browser plays raw default
+  if (audioIdx === 0 && isTrackRawPlayable(audioTracks?.[0])) return baseUrl;
+  // Otherwise the URL points to the cached remuxed file
   const sep = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${sep}audio=${audioIdx}`;
 }
@@ -15,6 +22,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
   const wasPlayingRef = useRef(false);
+  const cancelPollRef = useRef(false);
 
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [activeSubIdx, setActiveSubIdx] = useState(-1);
@@ -22,34 +30,58 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioIdx, setAudioIdx] = useState(0);
-  const [audioPrep, setAudioPrep] = useState(null); // { idx, progress, duration, status, error }
+  const [audioReady, setAudioReady] = useState(true);
+  const [audioPrep, setAudioPrep] = useState(null); // { idx, status, progress, duration, error }
 
-  const effectiveSrc = buildStreamUrl(src, audioIdx);
+  const effectiveSrc = audioReady ? buildStreamUrl(src, audioIdx, audioTracks) : null;
 
   // Reset on media change
   useEffect(() => {
+    cancelPollRef.current = true;
     setActiveSubIdx(-1);
     setLoadingSubIdx(-1);
     setShowSubMenu(false);
     setShowAudioMenu(false);
     setAudioIdx(0);
     setAudioPrep(null);
+    setAudioReady(true);
     pendingSeekRef.current = null;
+    wasPlayingRef.current = false;
   }, [mediaId]);
 
-  // Apply selected subtitle
+  // Auto-prepare the default audio if it's not browser-playable (e.g. AC-3 / DTS).
+  // This avoids the "video plays silently" trap on default load.
+  useEffect(() => {
+    if (audioTracks.length === 0) return; // not yet probed — let raw default attempt play
+    const def = audioTracks[0];
+    if (def && def.rawPlayable === false && audioIdx === 0 && audioReady) {
+      runPrepareFlow(0).catch(() => { /* error state already set */ });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId, audioTracks.length]);
+
+  // Apply selected subtitle. Tracks may load async after src changes — we listen
+  // to addtrack/change events, plus retry a few times to handle race conditions.
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || !v.textTracks) return;
     const apply = () => {
       for (let i = 0; i < v.textTracks.length; i++) {
         v.textTracks[i].mode = (i === activeSubIdx) ? 'showing' : 'hidden';
       }
     };
     apply();
-    const t = setTimeout(apply, 150);
-    return () => clearTimeout(t);
-  }, [activeSubIdx, subs.length, mediaId]);
+    const t1 = setTimeout(apply, 100);
+    const t2 = setTimeout(apply, 500);
+    const t3 = setTimeout(apply, 1500);
+    v.textTracks.addEventListener('addtrack', apply);
+    v.textTracks.addEventListener('change', apply);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      v.textTracks.removeEventListener('addtrack', apply);
+      v.textTracks.removeEventListener('change', apply);
+    };
+  }, [activeSubIdx, subs.length, mediaId, effectiveSrc]);
 
   // Client: apply sync state from server
   useEffect(() => {
@@ -66,7 +98,6 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setTimeout(() => { suppressRef.current = false; }, 50);
   }, [syncState, isHost]);
 
-  // After src change (audio switch), seek + restore play state
   function onLoadedMetadata() {
     const v = videoRef.current;
     if (!v) return;
@@ -104,25 +135,9 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(idx);
   }
 
-  async function activateAudioTrack(idx) {
-    setShowAudioMenu(false);
-    if (idx === audioIdx) return;
-
-    // Preserve current playback position + play state
-    const v = videoRef.current;
-    if (v) {
-      pendingSeekRef.current = v.currentTime;
-      wasPlayingRef.current = !v.paused;
-    }
-
-    if (idx === 0) {
-      // Default audio — instant switch (raw file, full range support)
-      setAudioPrep(null);
-      setAudioIdx(0);
-      return;
-    }
-
-    // Alternate audio — kick off remux + poll until ready
+  async function runPrepareFlow(idx) {
+    cancelPollRef.current = false;
+    setAudioReady(false);
     setAudioPrep({ idx, status: 'running', progress: 0, duration: 0 });
     try {
       const r = await fetch(`${streamBase}/api/audio/prepare`, {
@@ -133,35 +148,70 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       const initial = await r.json();
       if (initial.status === 'ready') {
         setAudioPrep(null);
-        setAudioIdx(idx);
+        setAudioReady(true);
         return;
       }
+      if (initial.status === 'error') {
+        setAudioPrep({ idx, status: 'error', error: initial.error || 'Erreur' });
+        throw new Error(initial.error);
+      }
       // Poll
-      let cancelled = false;
-      const poll = async () => {
-        if (cancelled) return;
-        try {
-          const sr = await fetch(`${streamBase}/api/audio/status/${mediaId}/${idx}`);
-          const data = await sr.json();
-          if (data.status === 'ready') {
-            setAudioPrep(null);
-            setAudioIdx(idx);
-            return;
+      await new Promise((resolve, reject) => {
+        const poll = async () => {
+          if (cancelPollRef.current) return;
+          try {
+            const sr = await fetch(`${streamBase}/api/audio/status/${mediaId}/${idx}`);
+            const data = await sr.json();
+            if (data.status === 'ready') {
+              setAudioPrep(null);
+              setAudioReady(true);
+              resolve();
+              return;
+            }
+            if (data.status === 'error') {
+              setAudioPrep({ idx, status: 'error', error: data.error || 'Erreur' });
+              reject(new Error(data.error));
+              return;
+            }
+            setAudioPrep({ idx, status: 'running', progress: data.progress || 0, duration: data.duration || 0 });
+            setTimeout(poll, 1000);
+          } catch (e) {
+            setAudioPrep({ idx, status: 'error', error: e.message });
+            reject(e);
           }
-          if (data.status === 'error') {
-            setAudioPrep({ idx, status: 'error', error: data.error || 'Erreur' });
-            return;
-          }
-          setAudioPrep({ idx, status: 'running', progress: data.progress || 0, duration: data.duration || 0 });
-          setTimeout(poll, 1000);
-        } catch (e) {
-          setAudioPrep({ idx, status: 'error', error: e.message });
-        }
-      };
-      poll();
+        };
+        poll();
+      });
     } catch (e) {
-      setAudioPrep({ idx, status: 'error', error: e.message });
+      throw e;
     }
+  }
+
+  async function activateAudioTrack(idx) {
+    setShowAudioMenu(false);
+    if (idx === audioIdx && audioReady) return;
+
+    // Preserve current playback position + play state for after the reload
+    const v = videoRef.current;
+    if (v) {
+      pendingSeekRef.current = v.currentTime;
+      wasPlayingRef.current = !v.paused;
+    }
+
+    const t = audioTracks[idx];
+    // Track 0 + raw playable → instant switch, no remux, no prep needed
+    if (idx === 0 && isTrackRawPlayable(t)) {
+      cancelPollRef.current = true;
+      setAudioPrep(null);
+      setAudioReady(true);
+      setAudioIdx(0);
+      return;
+    }
+
+    setAudioIdx(idx);
+    try {
+      await runPrepareFlow(idx);
+    } catch { /* error displayed in menu */ }
   }
 
   if (!src) {
@@ -180,29 +230,67 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     ? Math.min(100, Math.round((audioPrep.progress / audioPrep.duration) * 100))
     : null;
 
+  const showPrepOverlay = !audioReady && audioPrep?.status === 'running';
+  const showErrorOverlay = audioPrep?.status === 'error';
+
   return (
     <div className="player-wrap">
-      <video
-        ref={videoRef}
-        src={effectiveSrc}
-        controls={isHost}
-        autoPlay={false}
-        crossOrigin="anonymous"
-        onLoadedMetadata={onLoadedMetadata}
-        onPlay={() => !suppressRef.current && emitState({ paused: false })}
-        onPause={() => !suppressRef.current && emitState({ paused: true })}
-        onSeeked={() => !suppressRef.current && emitState()}
-      >
-        {subs.map((s) => (
-          <track
-            key={`${mediaId}-${s.idx}`}
-            kind="subtitles"
-            src={`${streamBase}/api/subs/${mediaId}/${s.idx}.vtt`}
-            srcLang={s.lang === 'und' ? undefined : s.lang}
-            label={s.label}
-          />
-        ))}
-      </video>
+      {effectiveSrc ? (
+        <video
+          ref={videoRef}
+          src={effectiveSrc}
+          controls={isHost}
+          autoPlay={false}
+          crossOrigin="anonymous"
+          onLoadedMetadata={onLoadedMetadata}
+          onPlay={() => !suppressRef.current && emitState({ paused: false })}
+          onPause={() => !suppressRef.current && emitState({ paused: true })}
+          onSeeked={() => !suppressRef.current && emitState()}
+        >
+          {subs.map((s) => (
+            <track
+              key={`${mediaId}-${s.idx}`}
+              kind="subtitles"
+              src={`${streamBase}/api/subs/${mediaId}/${s.idx}.vtt`}
+              srcLang={s.lang === 'und' ? undefined : s.lang}
+              label={s.label}
+              onLoad={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                for (let i = 0; i < v.textTracks.length; i++) {
+                  v.textTracks[i].mode = (i === activeSubIdx) ? 'showing' : 'hidden';
+                }
+              }}
+              onError={(e) => console.warn('[track] failed to load', s.label, e)}
+            />
+          ))}
+        </video>
+      ) : (
+        <div className="player-prep-bg" />
+      )}
+
+      {showPrepOverlay && (
+        <div className="player-prep-overlay">
+          <Loader2 size={36} strokeWidth={1.75} className="spin" />
+          <div className="prep-title">Préparation de l'audio</div>
+          <div className="prep-subtitle">
+            {audioTracks[audioPrep.idx]?.label || `Piste ${audioPrep.idx}`}
+          </div>
+          <div className="prep-bar">
+            <div className="prep-bar-fill" style={{ width: `${audioProgressPct ?? 0}%` }} />
+          </div>
+          <div className="prep-pct">{audioProgressPct != null ? `${audioProgressPct}%` : 'démarrage…'}</div>
+        </div>
+      )}
+
+      {showErrorOverlay && !showPrepOverlay && (
+        <div className="player-prep-overlay error">
+          <AlertTriangle size={32} strokeWidth={1.75} />
+          <div className="prep-title">Échec de préparation</div>
+          <div className="prep-subtitle">{audioPrep.error}</div>
+          <button className="primary" onClick={() => activateAudioTrack(0)}>Revenir à l'audio par défaut</button>
+        </div>
+      )}
 
       <div className="player-overlay">
         {audioTracks.length > 1 && (
@@ -231,6 +319,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                   {audioTracks.map((t, i) => {
                     const isActive = i === audioIdx;
                     const prepActive = audioPrep?.idx === i && audioPrep?.status === 'running';
+                    const needsRemux = !isTrackRawPlayable(t) || i !== 0;
                     return (
                       <button
                         key={i}
@@ -240,7 +329,9 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                       >
                         <span className="overlay-check">{isActive && <Check size={14} />}</span>
                         <span className="overlay-label">{t.label}</span>
-                        {i === 0 && <span className="overlay-tag">défaut</span>}
+                        {needsRemux && t.codec && (
+                          <span className="overlay-tag" title={`${t.codec} → AAC remux`}>{t.codec.toUpperCase()}</span>
+                        )}
                         {prepActive && (
                           <span className="overlay-progress-inline">
                             {audioProgressPct != null ? `${audioProgressPct}%` : '…'}
@@ -253,7 +344,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                     <div className="overlay-error">Erreur : {audioPrep.error}</div>
                   )}
                   <div className="overlay-hint">
-                    Changer de piste relit la vidéo après remux (1ʳᵉ fois ~30 s à quelques minutes selon la taille)
+                    Les pistes incompatibles sont remuxées en AAC (mis en cache après la 1ʳᵉ lecture)
                   </div>
                 </div>
               </>

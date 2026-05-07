@@ -196,8 +196,18 @@ function setAudioTracksForMedia(mediaId, tracks) {
     label: t.label,
     codec: t.codec,
     channels: t.channels,
-    isDefault: !!t.isDefault
+    isDefault: !!t.isDefault,
+    rawPlayable: !!t.rawPlayable
   }));
+}
+
+function setMediaProbeInfo(mediaId, info) {
+  const m = media.get(mediaId);
+  if (!m || !info) return;
+  m.videoCodec = info.videoCodec || null;
+  m.videoProfile = info.videoProfile || null;
+  m.duration = info.duration || 0;
+  if (info.audioTracks) setAudioTracksForMedia(mediaId, info.audioTracks);
 }
 
 function addEmbeddedSubsToMedia(mediaId, tracks) {
@@ -224,5 +234,5 @@ function getScanFolders() {
 module.exports = {
   scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia,
   setMediaMeta, addEmbeddedSubsToMedia, setAudioTracksForMedia,
-  getScanFolders, LANG_LABELS
+  setMediaProbeInfo, getScanFolders, LANG_LABELS
 };
