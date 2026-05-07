@@ -42,7 +42,11 @@ function stripMedia(m) {
       year: m.meta.year,
       overview: m.meta.overview,
       rating: m.meta.rating,
-      type: m.meta.type
+      type: m.meta.type,
+      season: m.meta.season,
+      episode: m.meta.episode,
+      episodeTitle: m.meta.episodeTitle,
+      showName: m.meta.showName || m.meta.title
     } : null
   };
 }

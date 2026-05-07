@@ -1,8 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-let MatroskaSubtitles = null;
-try { MatroskaSubtitles = require('matroska-subtitles'); } catch { /* optional */ }
+let SubtitleParser = null;
+try {
+  const ms = require('matroska-subtitles');
+  // v3+ exports { SubtitleParser, SubtitleStream }; older versions may default-export the class
+  SubtitleParser = ms.SubtitleParser || ms.MatroskaSubtitles || ms.default || (typeof ms === 'function' ? ms : null);
+} catch { /* optional */ }
 
 let cacheDir = null;
 
@@ -58,7 +62,10 @@ function getSidecarAsVTT(subEntry) {
 /* ─────────── MKV embedded ─────────── */
 
 function probeMkv(filePath) {
-  if (!MatroskaSubtitles) return Promise.resolve([]);
+  if (!SubtitleParser) {
+    console.warn('[subtitles] SubtitleParser not available — matroska-subtitles export shape unexpected');
+    return Promise.resolve([]);
+  }
   return new Promise((resolve) => {
     const tracks = [];
     let resolved = false;
@@ -73,37 +80,47 @@ function probeMkv(filePath) {
     };
 
     try {
-      parser = new MatroskaSubtitles();
+      parser = new SubtitleParser();
       stream = fs.createReadStream(filePath);
-    } catch {
+    } catch (e) {
+      console.error('[subtitles] probeMkv setup failed:', e.message);
       return finish();
     }
 
     parser.once('tracks', (t) => {
       if (Array.isArray(t)) tracks.push(...t);
-      setTimeout(finish, 50);
+      // Give the parser a tiny moment in case extra track events follow, then bail
+      setTimeout(finish, 100);
     });
-    parser.on('error', finish);
-    stream.on('error', finish);
+    parser.on('error', (e) => {
+      console.error('[subtitles] parser error during probe:', e.message);
+      finish();
+    });
+    stream.on('error', (e) => {
+      console.error('[subtitles] stream error during probe:', e.message);
+      finish();
+    });
     stream.on('end', finish);
 
     try {
       stream.pipe(parser);
-    } catch {
+    } catch (e) {
+      console.error('[subtitles] pipe failed:', e.message);
       return finish();
     }
 
-    setTimeout(finish, 30000); // safety
+    // Safety timeout — some files have tracks deep into the header
+    setTimeout(finish, 60000);
   });
 }
 
 function extractMkvSub(filePath, trackNumber) {
-  if (!MatroskaSubtitles) return Promise.resolve([]);
+  if (!SubtitleParser) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
     const cues = [];
     let parser, stream;
     try {
-      parser = new MatroskaSubtitles();
+      parser = new SubtitleParser();
       stream = fs.createReadStream(filePath);
     } catch (e) { return reject(e); }
 
@@ -168,7 +185,7 @@ async function getEmbeddedAsVTT(media, sub) {
   return vtt;
 }
 
-function isMkvSupported() { return !!MatroskaSubtitles; }
+function isMkvSupported() { return !!SubtitleParser; }
 
 module.exports = {
   setCacheDir,
