@@ -1,9 +1,12 @@
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const { Server } = require('socket.io');
 const { scanFolder, getCatalog, getMedia } = require('./catalog.cjs');
 const { streamMedia } = require('./streaming.cjs');
 const subtitles = require('./subtitles.cjs');
+const ffmpeg = require('./ffmpeg.cjs');
 
 const state = {
   mediaId: null,
@@ -17,6 +20,10 @@ const MAX_CHAT = 50;
 
 let hostSocketId = null;
 let io = null;
+let audioCacheDir = null;
+
+// In-memory remux job tracking: key = `${mediaId}:${audioIdx}`
+const remuxJobs = new Map();
 
 function projectedState() {
   if (state.paused || state.mediaId === null) return { ...state };
@@ -36,6 +43,14 @@ function stripMedia(m) {
       label: s.label,
       type: s.type,
       embedded: s.type === 'embedded'
+    })),
+    audioTracks: (m.audioTracks || []).map((t) => ({
+      idx: t.idx,
+      lang: t.lang,
+      label: t.label,
+      codec: t.codec,
+      channels: t.channels,
+      isDefault: !!t.isDefault
     })),
     meta: m.meta && !m.meta.notFound ? {
       poster: m.meta.poster,
@@ -71,9 +86,58 @@ function broadcastCatalog() {
 
 function getState() { return projectedState(); }
 
-function startServer(port) {
+function audioCachePath(mediaId, audioIdx) {
+  if (!audioCacheDir) return null;
+  return path.join(audioCacheDir, `${mediaId}-a${audioIdx}.mp4`);
+}
+
+function jobKey(mediaId, audioIdx) {
+  return `${mediaId}:${audioIdx}`;
+}
+
+async function startRemuxJob(media, audioIdx) {
+  const key = jobKey(media.id, audioIdx);
+  const existing = remuxJobs.get(key);
+  if (existing && existing.status === 'running') return existing;
+
+  const cachedPath = audioCachePath(media.id, audioIdx);
+  if (!cachedPath) throw new Error('audio cache directory not configured');
+  if (fs.existsSync(cachedPath)) {
+    const job = { status: 'ready', progress: 1, duration: 1 };
+    remuxJobs.set(key, job);
+    return job;
+  }
+
+  const job = { status: 'running', progress: 0, duration: 0, startedAt: Date.now() };
+  remuxJobs.set(key, job);
+
+  // Probe duration so we can compute %
+  ffmpeg.probeDuration(media.source.path).then((d) => { job.duration = d || 0; });
+
+  ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, (sec) => {
+    job.progress = sec;
+  }).then(() => {
+    job.status = 'ready';
+    if (job.duration > 0) job.progress = job.duration;
+  }).catch((e) => {
+    job.status = 'error';
+    job.error = e.message;
+    console.error('[ffmpeg] remux failed:', e.message);
+    try { fs.unlinkSync(cachedPath); } catch {}
+  });
+
+  return job;
+}
+
+function startServer(port, opts = {}) {
+  audioCacheDir = opts.audioCacheDir || null;
+  if (audioCacheDir) {
+    try { fs.mkdirSync(audioCacheDir, { recursive: true }); } catch {}
+  }
+
   return new Promise((resolve, reject) => {
     const app = express();
+    app.use(express.json());
 
     app.use((req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -89,7 +153,55 @@ function startServer(port) {
     app.get('/api/stream/:id', (req, res) => {
       const m = getMedia(req.params.id);
       if (!m) return res.status(404).end('Unknown media');
+      const audio = req.query.audio != null ? parseInt(req.query.audio, 10) : null;
+      if (audio != null && audio !== 0) {
+        const cachedPath = audioCachePath(m.id, audio);
+        if (cachedPath && fs.existsSync(cachedPath)) {
+          // Stream the remuxed file with full range support
+          return streamMedia(req, res, {
+            source: { type: 'local', path: cachedPath, ext: 'mp4' }
+          });
+        }
+        return res.status(409).end('Audio track not yet prepared — POST /api/audio/prepare first');
+      }
       streamMedia(req, res, m);
+    });
+
+    app.post('/api/audio/prepare', async (req, res) => {
+      const { mediaId, audioIdx } = req.body || {};
+      const m = getMedia(mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      if (audioIdx == null || audioIdx === 0) return res.json({ status: 'ready' });
+      if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
+      try {
+        const job = await startRemuxJob(m, parseInt(audioIdx, 10));
+        res.json({
+          status: job.status,
+          progress: job.progress,
+          duration: job.duration,
+          error: job.error
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.get('/api/audio/status/:mediaId/:audioIdx', (req, res) => {
+      const audioIdx = parseInt(req.params.audioIdx, 10);
+      const mediaId = req.params.mediaId;
+      if (audioIdx === 0) return res.json({ status: 'ready' });
+      const cachedPath = audioCachePath(mediaId, audioIdx);
+      if (cachedPath && fs.existsSync(cachedPath)) return res.json({ status: 'ready' });
+      const job = remuxJobs.get(jobKey(mediaId, audioIdx));
+      if (job) {
+        return res.json({
+          status: job.status,
+          progress: job.progress,
+          duration: job.duration,
+          error: job.error
+        });
+      }
+      res.json({ status: 'idle' });
     });
 
     app.get('/api/subs/:mediaId/:idx.vtt', async (req, res) => {

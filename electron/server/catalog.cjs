@@ -143,6 +143,7 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
           ext: ext.slice(1)
         },
         subs,
+        audioTracks: [],
         meta: null
       });
     } catch { /* skip */ }
@@ -186,6 +187,19 @@ function setMediaMeta(id, meta) {
   const m = media.get(id);
   if (m) m.meta = meta;
 }
+function setAudioTracksForMedia(mediaId, tracks) {
+  const m = media.get(mediaId);
+  if (!m) return;
+  m.audioTracks = (tracks || []).map((t) => ({
+    idx: t.idx,
+    lang: t.lang,
+    label: t.label,
+    codec: t.codec,
+    channels: t.channels,
+    isDefault: !!t.isDefault
+  }));
+}
+
 function addEmbeddedSubsToMedia(mediaId, tracks) {
   const m = media.get(mediaId);
   if (!m) return;
@@ -209,5 +223,6 @@ function getScanFolders() {
 
 module.exports = {
   scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia,
-  setMediaMeta, addEmbeddedSubsToMedia, getScanFolders, LANG_LABELS
+  setMediaMeta, addEmbeddedSubsToMedia, setAudioTracksForMedia,
+  getScanFolders, LANG_LABELS
 };

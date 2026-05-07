@@ -3,10 +3,11 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { startServer, getCatalog, scanFolder, getState, broadcastCatalog } = require('./server/server.cjs');
-const { getAllMedia, addEmbeddedSubsToMedia } = require('./server/catalog.cjs');
+const { getAllMedia, addEmbeddedSubsToMedia, setAudioTracksForMedia } = require('./server/catalog.cjs');
 const tunnel = require('./server/tunnel.cjs');
 const metadata = require('./server/metadata.cjs');
 const subtitles = require('./server/subtitles.cjs');
+const ffmpeg = require('./server/ffmpeg.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -86,7 +87,8 @@ async function processInBackground(items) {
       metadata.hasApiKey()
         ? metadata.enrichBatch(items, () => scheduleBroadcast())
         : Promise.resolve(),
-      probeAllMKVs(items)
+      probeAllMKVs(items),
+      probeAllAudioTracks(items)
     ]);
   } finally {
     processing = false;
@@ -111,8 +113,25 @@ async function probeAllMKVs(items) {
   }
 }
 
+async function probeAllAudioTracks(items) {
+  if (!ffmpeg.isAvailable()) return;
+  for (const item of items) {
+    if (item.audioTracks && item.audioTracks.length > 0) continue;
+    try {
+      const tracks = await ffmpeg.probeAudioTracks(item.source.path);
+      if (tracks.length > 0) {
+        setAudioTracksForMedia(item.id, tracks);
+        scheduleBroadcast();
+      }
+    } catch (e) {
+      console.error('Audio probe failed for', item.title, e.message);
+    }
+  }
+}
+
 app.whenReady().then(async () => {
-  serverInfo = await startServer(SERVER_PORT);
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache');
+  serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
 
