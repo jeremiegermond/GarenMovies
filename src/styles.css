@@ -1000,10 +1000,16 @@ input:disabled { opacity: 0.5; }
   align-items: start;
 }
 
-/* Card */
+/* Card — overrides the global `button` rule (which uses inline-flex /
+   align-items center / justify-content center / white-space nowrap, none of
+   which we want on a vertical poster card). */
 .card {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  white-space: normal;
+  width: 100%;
   gap: 10px;
   background: transparent;
   border: none;

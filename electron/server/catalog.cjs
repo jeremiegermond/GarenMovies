@@ -26,12 +26,34 @@ function makeId(filePath) {
   return crypto.createHash('sha1').update(filePath).digest('hex').slice(0, 12);
 }
 
+// Patterns we strip from filenames to get a cleaner display title and to
+// improve TMDB search precision. Order matters slightly: we strip
+// container/encoding noise, then language tags, then quality markers.
+const RELEASE_NOISE = /\b(\d{3,4}p|x264|x265|h264|h265|hevc|10bit|12bit|hdr10\+?|hdr|dv|bluray|brrip|dvdrip|web-?dl|hdrip|webrip|webmux|dlmux|bdmux|amzn|nf|hmax|dsnp|atvp|atmos|dts(?:-?hd)?|aac|ac3|truehd|ddp?\d\.\d|dd\d\.\d|opus|flac|x?264|hi10p|10b|repack|proper|extended|uncut|remastered|director'?s?cut|complete|imax|hybrid|hsbs|3d|sbs)\b/gi;
+const LANG_NOISE = /\b(ita|eng|fra|fre|ger|spa|esp|deu|por|rus|jpn|chs|cht|kor|hin|ara|italian|english|french|spanish|german|portuguese|japanese|chinese|korean|russian|arabic|multi|multi-?subs?|dual-?audio)\b/gi;
+
 function prettyTitle(filename) {
   return path.parse(filename).name
     .replace(/[._]+/g, ' ')
-    .replace(/\b(\d{3,4}p|x264|x265|h264|h265|hevc|10bit|bluray|brrip|dvdrip|web-?dl|hdrip|webrip|amzn|nf|hmax|atmos|dts|aac|ddp?5\.1|ac3)\b/gi, '')
-    .replace(/\b\[[^\]]+\]/g, '') // strip [GROUP] tags
-    .replace(/-[A-Z0-9]+$/i, '')   // strip trailing -RELEASE-GROUP
+    .replace(RELEASE_NOISE, '')
+    .replace(LANG_NOISE, '')
+    .replace(/\b\[[^\]]+\]/g, '')      // [GROUP] tags
+    .replace(/\([^)]*\)/g, (m) => /\d{4}/.test(m) ? m : '') // keep (2010) years, drop other parens
+    .replace(/-[A-Z0-9]{2,}$/i, '')    // trailing -RELEASEGROUP
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanFolderName(name) {
+  return name
+    .replace(/[._]+/g, ' ')
+    .replace(RELEASE_NOISE, '')
+    .replace(LANG_NOISE, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\b(season|saison|série|complete|integral)\s*\d+\b/gi, '')
+    .replace(/\bs\d{1,2}\b/gi, '')
+    .replace(/\s*[-_]\s*/g, ' ')
+    .replace(/^[\s\-_]+|[\s\-_]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -131,9 +153,20 @@ async function walkDir(dir, depth = 0, maxDepth = 4) {
       const stat = await fs.stat(full);
       const subsRaw = findSidecarSubs(entry.name, fileNames, dir);
       const subs = subsRaw.map((s, idx) => ({ idx, ...s }));
+      let title = prettyTitle(entry.name);
+      // Episode markers at the very start (e.g. "2x01 Il Controllo …") don't
+      // give parseTitle a show name to query TMDB with. Pull it from the
+      // parent folder so TV grouping + poster lookups can work.
+      const startsWithEp = /^(s\d{1,2}e\d{1,2}|\d{1,2}x\d{1,2})\b/i.test(title);
+      if (startsWithEp) {
+        const folderShow = cleanFolderName(path.basename(dir));
+        if (folderShow && !title.toLowerCase().startsWith(folderShow.toLowerCase())) {
+          title = `${folderShow} ${title}`;
+        }
+      }
       found.push({
         id: makeId(full),
-        title: prettyTitle(entry.name),
+        title,
         category: 'stream',
         source: {
           type: 'local',
