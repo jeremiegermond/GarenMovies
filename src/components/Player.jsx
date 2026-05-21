@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Captions, Loader2, Check, Volume2, AlertTriangle, Search } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 
 const SYNC_THRESHOLD = 1.0;
@@ -28,6 +28,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [activeSubIdx, setActiveSubIdx] = useState(-1);
   const [loadingSubIdx, setLoadingSubIdx] = useState(-1);
+  const [subOffset, setSubOffset] = useState(0); // seconds, +/-
+  const originalCuesRef = useRef(new Map()); // key = `${mediaId}-${subIdx}` -> [{start, end}]
 
   const [showSubSearch, setShowSubSearch] = useState(false);
   const [hasOSKey, setHasOSKey] = useState(false);
@@ -64,9 +66,13 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setAudioIdx(0);
     setAudioPrep(null);
     setAudioReady(true);
+    setSubOffset(0);
     pendingSeekRef.current = null;
     wasPlayingRef.current = false;
   }, [mediaId]);
+
+  // Reset offset when the user picks a different subtitle track
+  useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
 
   // Auto-prepare the default audio if it's not browser-playable (e.g. AC-3 / DTS).
   // This avoids the "video plays silently" trap on default load.
@@ -101,6 +107,66 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       v.textTracks.removeEventListener('change', apply);
     };
   }, [activeSubIdx, subs.length, mediaId, effectiveSrc]);
+
+  // Apply the manual offset to the active subtitle track's cues. Cues may load
+  // asynchronously (track src is fetched lazily), so we retry a few times until
+  // they're available.
+  useEffect(() => {
+    if (activeSubIdx < 0) return;
+    const v = videoRef.current;
+    if (!v || !v.textTracks) return;
+    const trackId = `${mediaId}-${activeSubIdx}`;
+
+    const apply = () => {
+      const track = v.textTracks[activeSubIdx];
+      if (!track || !track.cues || track.cues.length === 0) return false;
+      let orig = originalCuesRef.current.get(trackId);
+      if (!orig) {
+        orig = [];
+        for (let i = 0; i < track.cues.length; i++) {
+          orig.push({ start: track.cues[i].startTime, end: track.cues[i].endTime });
+        }
+        originalCuesRef.current.set(trackId, orig);
+      }
+      const n = Math.min(track.cues.length, orig.length);
+      for (let i = 0; i < n; i++) {
+        const c = track.cues[i];
+        const o = orig[i];
+        try {
+          c.startTime = Math.max(0, o.start + subOffset);
+          c.endTime = Math.max(c.startTime + 0.01, o.end + subOffset);
+        } catch { /* some browsers reject negative/overlapping times */ }
+      }
+      return true;
+    };
+
+    if (apply()) return;
+    const t1 = setTimeout(apply, 200);
+    const t2 = setTimeout(apply, 800);
+    const t3 = setTimeout(apply, 2000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [activeSubIdx, subOffset, mediaId, effectiveSrc]);
+
+  function syncSubToCurrentTime() {
+    const v = videoRef.current;
+    if (!v || activeSubIdx < 0 || !v.textTracks) return;
+    const track = v.textTracks[activeSubIdx];
+    if (!track || !track.cues || track.cues.length === 0) return;
+    // Find the cue whose current (shifted) start is closest to the current time,
+    // then compute the delta (currentTime - shiftedStart) to add to the offset
+    // so that cue aligns exactly at currentTime.
+    let bestDelta = null;
+    for (let i = 0; i < track.cues.length; i++) {
+      const c = track.cues[i];
+      const inRange = v.currentTime >= c.startTime && v.currentTime <= c.endTime;
+      const d = v.currentTime - c.startTime; // positive = need to shift subs forward
+      if (inRange) { bestDelta = d; break; }
+      if (bestDelta == null || Math.abs(d) < Math.abs(bestDelta)) bestDelta = d;
+    }
+    if (bestDelta != null) {
+      setSubOffset((prev) => +(prev + bestDelta).toFixed(3));
+    }
+  }
 
   // Client: apply sync state from server
   useEffect(() => {
@@ -414,6 +480,40 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                 )}
                 {subs.some((s) => s.embedded) && (
                   <div className="overlay-hint">Le premier chargement peut prendre quelques secondes</div>
+                )}
+                {activeSubIdx >= 0 && (
+                  <div className="sub-offset">
+                    <div className="sub-offset-head">
+                      <span>Décalage</span>
+                      <span className={`sub-offset-value ${subOffset !== 0 ? 'shifted' : ''}`}>
+                        {subOffset === 0 ? '0.00 s' : `${subOffset > 0 ? '+' : ''}${subOffset.toFixed(2)} s`}
+                      </span>
+                    </div>
+                    <div className="sub-offset-row">
+                      <button onClick={() => setSubOffset((o) => +(o - 0.5).toFixed(3))} title="Avancer les sous-titres de 0.5 s">−0.5</button>
+                      <button onClick={() => setSubOffset((o) => +(o - 0.1).toFixed(3))} title="Avancer les sous-titres de 0.1 s">−0.1</button>
+                      <button onClick={() => setSubOffset((o) => +(o + 0.1).toFixed(3))} title="Retarder les sous-titres de 0.1 s">+0.1</button>
+                      <button onClick={() => setSubOffset((o) => +(o + 0.5).toFixed(3))} title="Retarder les sous-titres de 0.5 s">+0.5</button>
+                    </div>
+                    <div className="sub-offset-row">
+                      <button
+                        className="sub-offset-action"
+                        onClick={syncSubToCurrentTime}
+                        title="Aligne la phrase la plus proche sur le temps actuel"
+                      >
+                        <Crosshair size={12} strokeWidth={2} /> Aligner ici
+                      </button>
+                      {subOffset !== 0 && (
+                        <button
+                          className="sub-offset-reset"
+                          onClick={() => setSubOffset(0)}
+                          title="Remettre à zéro"
+                        >
+                          <RotateCcw size={12} strokeWidth={2} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )}
                 <button
                   className="overlay-action"

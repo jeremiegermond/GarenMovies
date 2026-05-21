@@ -18,11 +18,19 @@ const SERVER_PORT = 4123;
 // Those throws bypass per-stream .on('error') handlers and would otherwise
 // crash the Electron main process with a modal error dialog. We log and keep
 // running — actual logic-level errors should still be caught at their source.
+function truncate(s, n = 800) {
+  if (typeof s !== 'string') s = String(s);
+  return s.length > n ? s.slice(0, n) + ' …[truncated]' : s;
+}
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+  // matroska-subtitles / ebml-stream can throw 'Unrepresentable length' with
+  // thousands of trailing zero characters that flood the log; we truncate.
+  const msg = err && err.stack ? err.stack : String(err);
+  console.error('[uncaughtException]', truncate(msg));
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason);
+  const msg = reason && reason.stack ? reason.stack : String(reason);
+  console.error('[unhandledRejection]', truncate(msg));
 });
 
 let mainWindow = null;
