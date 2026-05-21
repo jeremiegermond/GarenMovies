@@ -151,7 +151,9 @@ async function probeAllAudioTracks(items) {
 }
 
 app.whenReady().then(async () => {
-  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache');
+  // v2: bumped after switching ffmpeg flags (+genpts / async resample /
+  // avoid_negative_ts) to invalidate old remuxes that were causing A/V drift.
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v2');
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));

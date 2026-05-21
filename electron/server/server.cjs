@@ -163,12 +163,13 @@ function startServer(port, opts = {}) {
       const m = getMedia(req.params.id);
       if (!m) return res.status(404).end('Unknown media');
       const audio = req.query.audio != null ? parseInt(req.query.audio, 10) : null;
+      const force = req.query.force === '1';
 
       // No query → raw file (browser plays first audio track natively)
       if (audio == null) return streamMedia(req, res, m);
 
-      // ?audio=0 + track 0 raw-playable → still serve raw, no remux needed
-      if (audio === 0 && m.audioTracks?.[0]?.rawPlayable) {
+      // ?audio=0 + track 0 raw-playable + no force → still serve raw, no remux
+      if (!force && audio === 0 && m.audioTracks?.[0]?.rawPlayable) {
         return streamMedia(req, res, m);
       }
 
@@ -183,14 +184,15 @@ function startServer(port, opts = {}) {
     });
 
     app.post('/api/audio/prepare', async (req, res) => {
-      const { mediaId, audioIdx } = req.body || {};
+      const { mediaId, audioIdx, force } = req.body || {};
       const m = getMedia(mediaId);
       if (!m) return res.status(404).json({ error: 'Unknown media' });
       if (audioIdx == null) return res.status(400).json({ error: 'audioIdx required' });
 
       const idx = parseInt(audioIdx, 10);
-      // Track 0 with raw-playable codec needs no remux
-      if (idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
+      // Track 0 with raw-playable codec needs no remux UNLESS the client asks
+      // for a force remux (e.g. because raw playback failed on its side).
+      if (!force && idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
         return res.json({ status: 'ready', noRemux: true });
       }
       if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
@@ -211,7 +213,8 @@ function startServer(port, opts = {}) {
       const audioIdx = parseInt(req.params.audioIdx, 10);
       const mediaId = req.params.mediaId;
       const m = getMedia(mediaId);
-      if (audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
+      const force = req.query.force === '1';
+      if (!force && audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
         return res.json({ status: 'ready', noRemux: true });
       }
       const cachedPath = audioCachePath(mediaId, audioIdx);

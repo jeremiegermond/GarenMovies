@@ -121,13 +121,20 @@ function probeDuration(filePath) {
 }
 
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
-  const args = ['-y', '-i', inputPath, '-map', '0:v:0', '-map', `0:a:${audioIdx}`];
-  // Video copy + HEVC tag if needed (so MP4 plays in browsers)
+  // -fflags +genpts: regenerate presentation timestamps when source has gaps
+  // -avoid_negative_ts make_zero: shift negative starting timestamps to 0
+  // -af aresample=async=1000: keep audio aligned with video (up to ~20 ms
+  //   drift correction at 48 kHz) — fixes the 'audio out of sync' issue on
+  //   AC-3 / DTS sources after re-encoding to AAC.
+  const args = ['-y', '-fflags', '+genpts', '-i', inputPath];
+  args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
   args.push('-c:v', 'copy');
   if (options.videoTag) args.push('-tag:v', options.videoTag);
-  // Audio: re-encode to AAC for max compat
   args.push('-c:a', 'aac', '-b:a', '192k');
+  args.push('-af', 'aresample=async=1000:first_pts=0');
   args.push('-movflags', '+faststart');
+  args.push('-avoid_negative_ts', 'make_zero');
+  args.push('-max_muxing_queue_size', '9999');
   args.push('-progress', 'pipe:2', '-nostats');
   args.push(outputPath);
   return args;

@@ -9,13 +9,15 @@ function isTrackRawPlayable(track) {
   return !track || track.rawPlayable !== false;
 }
 
-function buildStreamUrl(baseUrl, audioIdx, audioTracks) {
+function buildStreamUrl(baseUrl, audioIdx, audioTracks, forceRemux) {
   if (!baseUrl) return null;
-  // Track 0 + raw-playable codec → no audio query, browser plays raw default
-  if (audioIdx === 0 && isTrackRawPlayable(audioTracks?.[0])) return baseUrl;
+  // No forced remux + track 0 + raw-playable codec → serve raw
+  if (!forceRemux && audioIdx === 0 && isTrackRawPlayable(audioTracks?.[0])) return baseUrl;
   // Otherwise the URL points to the cached remuxed file
+  const params = [`audio=${audioIdx}`];
+  if (forceRemux) params.push('force=1');
   const sep = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${sep}audio=${audioIdx}`;
+  return `${baseUrl}${sep}${params.join('&')}`;
 }
 
 export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
@@ -39,6 +41,9 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const [audioIdx, setAudioIdx] = useState(0);
   const [audioReady, setAudioReady] = useState(true);
   const [audioPrep, setAudioPrep] = useState(null); // { idx, status, progress, duration, error }
+  const [forceRemux, setForceRemux] = useState(false); // reactive fallback when raw playback fails
+  const [videoError, setVideoError] = useState(null); // unrecoverable playback error
+  const autoPrepDoneRef = useRef(null); // key = `${mediaId}-${audioIdx}-${forceRemux}`
 
   // Query the streaming server for OpenSubtitles availability + read local default lang
   useEffect(() => {
@@ -53,11 +58,14 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     }
   }, [streamBase, mediaId]);
 
-  const effectiveSrc = audioReady ? buildStreamUrl(src, audioIdx, audioTracks) : null;
+  const effectiveSrc = audioReady && !videoError
+    ? buildStreamUrl(src, audioIdx, audioTracks, forceRemux)
+    : null;
 
   // Reset on media change
   useEffect(() => {
     cancelPollRef.current = true;
+    autoPrepDoneRef.current = null;
     setActiveSubIdx(-1);
     setLoadingSubIdx(-1);
     setShowSubMenu(false);
@@ -67,6 +75,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setAudioPrep(null);
     setAudioReady(true);
     setSubOffset(0);
+    setForceRemux(false);
+    setVideoError(null);
     pendingSeekRef.current = null;
     wasPlayingRef.current = false;
   }, [mediaId]);
@@ -74,16 +84,26 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
 
-  // Auto-prepare the default audio if it's not browser-playable (e.g. AC-3 / DTS).
-  // This avoids the "video plays silently" trap on default load.
+  // Auto-prepare the audio when remux is required:
+  //   - track 0's codec is non-playable (AC-3, DTS, …), or
+  //   - the user picked a non-default track via the menu, or
+  //   - forceRemux was set (reactive fallback after raw playback failed).
+  // We use a ref guard so each (mediaId, idx, forceRemux) combo only fires
+  // once — depending on `audioTracks` reference alone would re-fire whenever
+  // the catalog broadcasts.
   useEffect(() => {
-    if (audioTracks.length === 0) return; // not yet probed — let raw default attempt play
+    if (audioTracks.length === 0 && !forceRemux) return;
     const def = audioTracks[0];
-    if (def && def.rawPlayable === false && audioIdx === 0 && audioReady) {
-      runPrepareFlow(0).catch(() => { /* error state already set */ });
-    }
+    const needsRemux = forceRemux
+      || audioIdx !== 0
+      || (def && def.rawPlayable === false);
+    if (!needsRemux) return;
+    const key = `${mediaId}-${audioIdx}-${forceRemux}`;
+    if (autoPrepDoneRef.current === key) return;
+    autoPrepDoneRef.current = key;
+    runPrepareFlow(audioIdx, forceRemux).catch(() => { /* error in audioPrep state */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaId, audioTracks.length]);
+  }, [mediaId, audioTracks, audioIdx, forceRemux]);
 
   // Apply selected subtitle. Tracks may load async after src changes — we listen
   // to addtrack/change events, plus retry a few times to handle race conditions.
@@ -220,15 +240,16 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(idx);
   }
 
-  async function runPrepareFlow(idx) {
+  async function runPrepareFlow(idx, force = false) {
     cancelPollRef.current = false;
     setAudioReady(false);
     setAudioPrep({ idx, status: 'running', progress: 0, duration: 0 });
+    const statusQuery = force ? '?force=1' : '';
     try {
       const r = await fetch(`${streamBase}/api/audio/prepare`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId, audioIdx: idx })
+        body: JSON.stringify({ mediaId, audioIdx: idx, force })
       });
       const initial = await r.json();
       if (initial.status === 'ready') {
@@ -245,7 +266,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         const poll = async () => {
           if (cancelPollRef.current) return;
           try {
-            const sr = await fetch(`${streamBase}/api/audio/status/${mediaId}/${idx}`);
+            const sr = await fetch(`${streamBase}/api/audio/status/${mediaId}/${idx}${statusQuery}`);
             const data = await sr.json();
             if (data.status === 'ready') {
               setAudioPrep(null);
@@ -272,9 +293,30 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     }
   }
 
+  function onVideoError(e) {
+    const err = e?.currentTarget?.error;
+    const code = err?.code;
+    console.warn('[video] error code', code, err?.message);
+    // Codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+    // If we were playing raw and the source/decoder rejected it, force a remux
+    // (handles HEVC-without-hvc1, AVI/WMV/FLV containers, hev1-tagged files…)
+    if (!forceRemux && (code === 3 || code === 4 || code === 2) && audioIdx === 0) {
+      console.warn('[video] raw playback failed — falling back to force-remux');
+      autoPrepDoneRef.current = null; // let the auto-prep effect re-trigger
+      setForceRemux(true);
+      return;
+    }
+    let label = 'Lecture impossible';
+    if (code === 3) label = 'Codec vidéo non supporté par le navigateur';
+    else if (code === 4) label = 'Source non lisible (conteneur ou codec rejeté)';
+    else if (code === 2) label = 'Erreur réseau';
+    else if (code === 1) label = 'Chargement interrompu';
+    setVideoError(label);
+  }
+
   async function activateAudioTrack(idx) {
     setShowAudioMenu(false);
-    if (idx === audioIdx && audioReady) return;
+    if (idx === audioIdx && audioReady && !videoError) return;
 
     // Preserve current playback position + play state for after the reload
     const v = videoRef.current;
@@ -283,9 +325,12 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       wasPlayingRef.current = !v.paused;
     }
 
+    setVideoError(null);
+    autoPrepDoneRef.current = null;
+
     const t = audioTracks[idx];
-    // Track 0 + raw playable → instant switch, no remux, no prep needed
-    if (idx === 0 && isTrackRawPlayable(t)) {
+    // Track 0 + raw playable + not in force-remux fallback → instant switch
+    if (idx === 0 && isTrackRawPlayable(t) && !forceRemux) {
       cancelPollRef.current = true;
       setAudioPrep(null);
       setAudioReady(true);
@@ -294,9 +339,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     }
 
     setAudioIdx(idx);
-    try {
-      await runPrepareFlow(idx);
-    } catch { /* error displayed in menu */ }
+    // Auto-prep effect will pick this up via the ref-guard.
   }
 
   if (!src) {
@@ -316,7 +359,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     : null;
 
   const showPrepOverlay = !audioReady && audioPrep?.status === 'running';
-  const showErrorOverlay = audioPrep?.status === 'error';
+  const showPrepError = audioPrep?.status === 'error' && !showPrepOverlay;
+  const showVideoError = !!videoError;
 
   return (
     <div className="player-wrap">
@@ -328,6 +372,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           autoPlay={false}
           crossOrigin="anonymous"
           onLoadedMetadata={onLoadedMetadata}
+          onError={onVideoError}
           onPlay={() => !suppressRef.current && emitState({ paused: false })}
           onPause={() => !suppressRef.current && emitState({ paused: true })}
           onSeeked={() => !suppressRef.current && emitState()}
@@ -368,12 +413,28 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         </div>
       )}
 
-      {showErrorOverlay && !showPrepOverlay && (
+      {showPrepError && (
         <div className="player-prep-overlay error">
           <AlertTriangle size={32} strokeWidth={1.75} />
           <div className="prep-title">Échec de préparation</div>
           <div className="prep-subtitle">{audioPrep.error}</div>
           <button className="primary" onClick={() => activateAudioTrack(0)}>Revenir à l'audio par défaut</button>
+        </div>
+      )}
+
+      {showVideoError && !showPrepOverlay && (
+        <div className="player-prep-overlay error">
+          <AlertTriangle size={32} strokeWidth={1.75} />
+          <div className="prep-title">{videoError}</div>
+          <div className="prep-subtitle">
+            Le format ou le codec n'est pas pris en charge par le lecteur web,
+            même après remux. Essayez une autre piste audio ou un autre fichier.
+          </div>
+          <button className="primary" onClick={() => {
+            setVideoError(null);
+            autoPrepDoneRef.current = null;
+            setForceRemux(false);
+          }}>Réessayer</button>
         </div>
       )}
 

@@ -1,0 +1,11 @@
+également, je ne sais pas pourquoi mais les films quasiment plus aucun n'arrive a etre lu, y'a un gros soucis sur le lecteur je crois.
+Il reste bloqué en gris ou ça fait un écran noir, le son est décalé de malade comparé a avant
+voici les formats que j'ai essayé de lire :
+- MKV
+- MP4
+- AVI
+- MOV
+- WMV
+- FLV
+- QT
+- ASF
