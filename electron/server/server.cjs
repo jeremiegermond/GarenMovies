@@ -6,7 +6,9 @@ const { Server } = require('socket.io');
 const { scanFolder, getCatalog, getMedia } = require('./catalog.cjs');
 const { streamMedia } = require('./streaming.cjs');
 const subtitles = require('./subtitles.cjs');
+const subtitleDownloader = require('./subtitle-downloader.cjs');
 const ffmpeg = require('./ffmpeg.cjs');
+const { addDownloadedSub } = require('./catalog.cjs');
 
 const state = {
   mediaId: null,
@@ -224,6 +226,67 @@ function startServer(port, opts = {}) {
         });
       }
       res.json({ status: 'idle' });
+    });
+
+    app.get('/api/subs/providers', (_req, res) => {
+      res.json({ opensubtitles: subtitleDownloader.hasApiKey() });
+    });
+
+    app.get('/api/subs/search/:mediaId', async (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      if (!subtitleDownloader.hasApiKey()) {
+        return res.status(503).json({ error: 'Aucune clé OpenSubtitles configurée' });
+      }
+
+      const lang = (req.query.lang || 'fr').toString().toLowerCase().slice(0, 5);
+      const opts = { language: lang };
+
+      if (m.meta?.type === 'tv') {
+        opts.type = 'episode';
+        opts.query = m.meta.showName || m.meta.title || m.title;
+        if (m.meta.season != null) opts.season = m.meta.season;
+        if (m.meta.episode != null) opts.episode = m.meta.episode;
+      } else {
+        opts.type = 'movie';
+        opts.query = m.meta?.title || m.title;
+        if (m.meta?.year) opts.year = m.meta.year;
+      }
+
+      try {
+        const results = await subtitleDownloader.search(opts);
+        res.json({ results, query: opts });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.post('/api/subs/download', async (req, res) => {
+      const { mediaId, fileId, lang, label } = req.body || {};
+      const m = getMedia(mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      if (!fileId) return res.status(400).json({ error: 'fileId requis' });
+      if (!subtitleDownloader.hasApiKey()) {
+        return res.status(503).json({ error: 'Aucune clé OpenSubtitles configurée' });
+      }
+
+      try {
+        const result = await subtitleDownloader.downloadSubtitle(fileId, { lang, mediaId });
+        const sub = addDownloadedSub(mediaId, {
+          path: result.path,
+          lang: lang || 'und',
+          label: label || `${(lang || 'und').toUpperCase()} (téléchargé)`
+        });
+        broadcastCatalog();
+        res.json({
+          sub: { idx: sub.idx, lang: sub.lang, label: sub.label, embedded: false, type: sub.type },
+          remaining: result.remaining,
+          requests: result.requests,
+          resetTime: result.resetTime
+        });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
     });
 
     app.get('/api/subs/:mediaId/:idx.vtt', async (req, res) => {

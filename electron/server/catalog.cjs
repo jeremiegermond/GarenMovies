@@ -201,6 +201,24 @@ function setAudioTracksForMedia(mediaId, tracks) {
   }));
 }
 
+function addDownloadedSub(mediaId, { path: srtPath, lang, label, ext = 'srt', source = 'opensubtitles' }) {
+  const m = media.get(mediaId);
+  if (!m) return null;
+  // Reuse 'sidecar' type so the /api/subs endpoint serves it like any other SRT
+  const idx = m.subs.length;
+  const sub = {
+    idx,
+    type: 'sidecar',
+    source,
+    lang: lang || 'und',
+    label: label || (lang ? (LANG_LABELS[lang] || lang.toUpperCase()) : 'Téléchargé'),
+    path: srtPath,
+    ext
+  };
+  m.subs.push(sub);
+  return sub;
+}
+
 function setMediaProbeInfo(mediaId, info) {
   const m = media.get(mediaId);
   if (!m || !info) return;
@@ -234,5 +252,6 @@ function getScanFolders() {
 module.exports = {
   scanFolder, clearLocalSources, getCatalog, getMedia, getAllMedia,
   setMediaMeta, addEmbeddedSubsToMedia, setAudioTracksForMedia,
-  setMediaProbeInfo, getScanFolders, LANG_LABELS
+  setMediaProbeInfo, addDownloadedSub,
+  getScanFolders, LANG_LABELS
 };

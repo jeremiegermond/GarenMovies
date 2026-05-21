@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Captions, Loader2, Check, Volume2, AlertTriangle } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search } from 'lucide-react';
+import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 
 const SYNC_THRESHOLD = 1.0;
 
@@ -17,7 +18,7 @@ function buildStreamUrl(baseUrl, audioIdx, audioTracks) {
   return `${baseUrl}${sep}audio=${audioIdx}`;
 }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], streamBase, mediaId }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
   const videoRef = useRef(null);
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
@@ -28,10 +29,27 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const [activeSubIdx, setActiveSubIdx] = useState(-1);
   const [loadingSubIdx, setLoadingSubIdx] = useState(-1);
 
+  const [showSubSearch, setShowSubSearch] = useState(false);
+  const [hasOSKey, setHasOSKey] = useState(false);
+  const [defaultSubLang, setDefaultSubLang] = useState('fr');
+
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioIdx, setAudioIdx] = useState(0);
   const [audioReady, setAudioReady] = useState(true);
   const [audioPrep, setAudioPrep] = useState(null); // { idx, status, progress, duration, error }
+
+  // Query the streaming server for OpenSubtitles availability + read local default lang
+  useEffect(() => {
+    if (!streamBase) return;
+    fetch(`${streamBase}/api/subs/providers`).then((r) => r.json()).then((d) => {
+      setHasOSKey(!!d.opensubtitles);
+    }).catch(() => {});
+    if (window.electronAPI?.getConfig) {
+      window.electronAPI.getConfig().then((cfg) => {
+        if (cfg?.defaultSubLang) setDefaultSubLang(cfg.defaultSubLang);
+      }).catch(() => {});
+    }
+  }, [streamBase, mediaId]);
 
   const effectiveSrc = audioReady ? buildStreamUrl(src, audioIdx, audioTracks) : null;
 
@@ -41,6 +59,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(-1);
     setLoadingSubIdx(-1);
     setShowSubMenu(false);
+    setShowSubSearch(false);
     setShowAudioMenu(false);
     setAudioIdx(0);
     setAudioPrep(null);
@@ -396,11 +415,35 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                 {subs.some((s) => s.embedded) && (
                   <div className="overlay-hint">Le premier chargement peut prendre quelques secondes</div>
                 )}
+                <button
+                  className="overlay-action"
+                  onClick={() => { setShowSubMenu(false); setShowSubSearch(true); }}
+                >
+                  <Search size={13} strokeWidth={2} />
+                  Rechercher en ligne
+                </button>
               </div>
             </>
           )}
         </div>
       </div>
+
+      {showSubSearch && (
+        <SubtitleSearchModal
+          streamBase={streamBase}
+          mediaId={mediaId}
+          mediaTitle={mediaTitle}
+          mediaMeta={mediaMeta}
+          defaultLang={defaultSubLang}
+          hasOpenSubtitlesKey={hasOSKey}
+          onClose={() => setShowSubSearch(false)}
+          onOpenSettings={onOpenSettings}
+          onDownloaded={(newSub) => {
+            // Auto-activate the freshly downloaded sub
+            if (newSub?.idx != null) setActiveSubIdx(newSub.idx);
+          }}
+        />
+      )}
     </div>
   );
 }

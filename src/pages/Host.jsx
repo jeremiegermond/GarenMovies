@@ -222,6 +222,9 @@ export default function Host({ onLeave }) {
                   audioTracks={activeMedia?.audioTracks || []}
                   streamBase={streamBase}
                   mediaId={activeId}
+                  mediaTitle={activeMedia?.title}
+                  mediaMeta={activeMedia?.meta}
+                  onOpenSettings={() => setSettingsOpen(true)}
                 />
               </main>
             </div>

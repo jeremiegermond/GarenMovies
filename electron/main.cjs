@@ -7,6 +7,7 @@ const { getAllMedia, addEmbeddedSubsToMedia, setMediaProbeInfo } = require('./se
 const tunnel = require('./server/tunnel.cjs');
 const metadata = require('./server/metadata.cjs');
 const subtitles = require('./server/subtitles.cjs');
+const subtitleDownloader = require('./server/subtitle-downloader.cjs');
 const ffmpeg = require('./server/ffmpeg.cjs');
 
 const isDev = !app.isPackaged;
@@ -134,9 +135,11 @@ app.whenReady().then(async () => {
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
+  subtitleDownloader.setDownloadDir(path.join(app.getPath('userData'), 'downloaded-subs'));
 
   const cfg = loadConfig();
   if (cfg.tmdbApiKey) metadata.setApiKey(cfg.tmdbApiKey);
+  if (cfg.openSubtitlesApiKey) subtitleDownloader.setApiKey(cfg.openSubtitlesApiKey);
 
   await createWindow();
 
@@ -181,6 +184,9 @@ ipcMain.handle('config:set', (_e, patch) => {
   if (patch && patch.tmdbApiKey !== undefined) {
     metadata.setApiKey(patch.tmdbApiKey);
     processInBackground(getAllMedia());
+  }
+  if (patch && patch.openSubtitlesApiKey !== undefined) {
+    subtitleDownloader.setApiKey(patch.openSubtitlesApiKey);
   }
   return cfg;
 });
