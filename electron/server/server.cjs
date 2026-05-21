@@ -8,7 +8,12 @@ const { streamMedia } = require('./streaming.cjs');
 const subtitles = require('./subtitles.cjs');
 const subtitleDownloader = require('./subtitle-downloader.cjs');
 const ffmpeg = require('./ffmpeg.cjs');
+const vlc = require('./vlc.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
+
+// Patterns that indicate ffmpeg couldn't even parse the input container —
+// usually means we should fall back to VLC's more lenient demuxer.
+const FFMPEG_PARSE_ERROR_RE = /(EBML header parsing failed|Invalid data found when processing input|moov atom not found|invalid argument|Unknown encoder)/i;
 
 const state = {
   mediaId: null,
@@ -107,33 +112,63 @@ async function startRemuxJob(media, audioIdx) {
   const cachedPath = audioCachePath(media.id, audioIdx);
   if (!cachedPath) throw new Error('audio cache directory not configured');
   if (fs.existsSync(cachedPath)) {
-    const job = { status: 'ready', progress: 1, duration: 1 };
+    const job = { status: 'ready', progress: 1, duration: 1, tool: 'cache' };
     remuxJobs.set(key, job);
     return job;
   }
 
-  const job = { status: 'running', progress: 0, duration: media.duration || 0, startedAt: Date.now() };
+  const job = {
+    status: 'running',
+    progress: 0,
+    duration: media.duration || 0,
+    startedAt: Date.now(),
+    tool: 'ffmpeg'
+  };
   remuxJobs.set(key, job);
 
   if (!job.duration) {
     ffmpeg.probeDuration(media.source.path).then((d) => { job.duration = d || 0; });
   }
 
-  // Add HEVC tag for browsers that need it to decode HEVC in MP4
-  const videoTag = ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
-  const opts = videoTag ? { videoTag } : {};
+  // Try ffmpeg first (fast, supports our HEVC tag), fall back to VLC if the
+  // input is too non-standard for libavformat (PSA HEVC, BDRips with custom
+  // EBML, etc.) — libVLC's demuxer is more forgiving.
+  (async () => {
+    const videoTag = ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
+    const opts = videoTag ? { videoTag } : {};
 
-  ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, opts, (sec) => {
-    job.progress = sec;
-  }).then(() => {
-    job.status = 'ready';
-    if (job.duration > 0) job.progress = job.duration;
-  }).catch((e) => {
-    job.status = 'error';
-    job.error = e.message;
-    console.error('[ffmpeg] remux failed:', e.message);
-    try { fs.unlinkSync(cachedPath); } catch {}
-  });
+    try {
+      await ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, opts, (sec) => {
+        job.progress = sec;
+      });
+      job.status = 'ready';
+      if (job.duration > 0) job.progress = job.duration;
+      return;
+    } catch (ffmpegErr) {
+      console.warn('[ffmpeg] remux failed:', ffmpegErr.message);
+      const shouldTryVLC = vlc.isAvailable() && FFMPEG_PARSE_ERROR_RE.test(ffmpegErr.message);
+      if (!shouldTryVLC) {
+        job.status = 'error';
+        job.error = ffmpegErr.message;
+        try { fs.unlinkSync(cachedPath); } catch {}
+        return;
+      }
+      // VLC fallback — slower (no progress events) but handles weird inputs
+      console.warn('[remux] falling back to VLC for', path.basename(media.source.path));
+      job.tool = 'vlc';
+      job.progress = 0; // reset; VLC doesn't give progress
+      try {
+        await vlc.remuxWithVLC(media.source.path, audioIdx, cachedPath);
+        job.status = 'ready';
+        if (job.duration > 0) job.progress = job.duration;
+      } catch (vlcErr) {
+        job.status = 'error';
+        job.error = `ffmpeg + VLC ont échoué.\nffmpeg: ${ffmpegErr.message.slice(0, 200)}\nVLC: ${vlcErr.message.slice(0, 200)}`;
+        console.error('[vlc] remux failed:', vlcErr.message);
+        try { fs.unlinkSync(cachedPath); } catch {}
+      }
+    }
+  })();
 
   return job;
 }
@@ -202,6 +237,7 @@ function startServer(port, opts = {}) {
           status: job.status,
           progress: job.progress,
           duration: job.duration,
+          tool: job.tool,
           error: job.error
         });
       } catch (e) {
@@ -225,6 +261,7 @@ function startServer(port, opts = {}) {
           status: job.status,
           progress: job.progress,
           duration: job.duration,
+          tool: job.tool,
           error: job.error
         });
       }

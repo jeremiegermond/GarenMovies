@@ -9,6 +9,7 @@ const metadata = require('./server/metadata.cjs');
 const subtitles = require('./server/subtitles.cjs');
 const subtitleDownloader = require('./server/subtitle-downloader.cjs');
 const ffmpeg = require('./server/ffmpeg.cjs');
+const vlc = require('./server/vlc.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -156,6 +157,14 @@ app.whenReady().then(async () => {
   // failed at the EBML stage now get a fresh remux with the new pipeline.
   const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v3');
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
+
+  // Log helper-tool availability so we know what's at our disposal.
+  console.log('[ffmpeg]', ffmpeg.isAvailable() ? 'OK' : 'MISSING');
+  if (vlc.isAvailable()) {
+    console.log('[vlc] fallback available at', vlc.findVLC(), '— version', vlc.getVLCVersion() || '?');
+  } else {
+    console.log('[vlc] not detected (install https://www.videolan.org/ for malformed-MKV fallback)');
+  }
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
   subtitleDownloader.setDownloadDir(path.join(app.getPath('userData'), 'downloaded-subs'));

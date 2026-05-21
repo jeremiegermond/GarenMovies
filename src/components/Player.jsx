@@ -258,9 +258,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         return;
       }
       if (initial.status === 'error') {
-        setAudioPrep({ idx, status: 'error', error: initial.error || 'Erreur' });
+        setAudioPrep({ idx, status: 'error', error: initial.error || 'Erreur', tool: initial.tool });
         throw new Error(initial.error);
       }
+      setAudioPrep({ idx, status: 'running', progress: 0, duration: 0, tool: initial.tool });
       // Poll
       await new Promise((resolve, reject) => {
         const poll = async () => {
@@ -275,11 +276,11 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
               return;
             }
             if (data.status === 'error') {
-              setAudioPrep({ idx, status: 'error', error: data.error || 'Erreur' });
+              setAudioPrep({ idx, status: 'error', error: data.error || 'Erreur', tool: data.tool });
               reject(new Error(data.error));
               return;
             }
-            setAudioPrep({ idx, status: 'running', progress: data.progress || 0, duration: data.duration || 0 });
+            setAudioPrep({ idx, status: 'running', progress: data.progress || 0, duration: data.duration || 0, tool: data.tool });
             setTimeout(poll, 1000);
           } catch (e) {
             setAudioPrep({ idx, status: 'error', error: e.message });
@@ -402,14 +403,23 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       {showPrepOverlay && (
         <div className="player-prep-overlay">
           <Loader2 size={36} strokeWidth={1.75} className="spin" />
-          <div className="prep-title">Préparation de l'audio</div>
+          <div className="prep-title">
+            {audioPrep.tool === 'vlc' ? 'Préparation via VLC' : "Préparation de l'audio"}
+          </div>
           <div className="prep-subtitle">
             {audioTracks[audioPrep.idx]?.label || `Piste ${audioPrep.idx}`}
+            {audioPrep.tool === 'vlc' && ' · fichier non standard, ffmpeg a refusé'}
           </div>
-          <div className="prep-bar">
-            <div className="prep-bar-fill" style={{ width: `${audioProgressPct ?? 0}%` }} />
-          </div>
-          <div className="prep-pct">{audioProgressPct != null ? `${audioProgressPct}%` : 'démarrage…'}</div>
+          {audioPrep.tool === 'vlc' ? (
+            <div className="prep-pct">Cela peut prendre quelques minutes — VLC ne donne pas de pourcentage</div>
+          ) : (
+            <>
+              <div className="prep-bar">
+                <div className="prep-bar-fill" style={{ width: `${audioProgressPct ?? 0}%` }} />
+              </div>
+              <div className="prep-pct">{audioProgressPct != null ? `${audioProgressPct}%` : 'démarrage…'}</div>
+            </>
+          )}
         </div>
       )}
 
