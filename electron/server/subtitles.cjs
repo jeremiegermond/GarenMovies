@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { pipeline } = require('stream');
 
 let SubtitleParser = null;
 try {
@@ -9,6 +10,9 @@ try {
 } catch { /* optional */ }
 
 let cacheDir = null;
+// Files for which probing has thrown an EBML/parser error in this session.
+// Avoid retrying — same file would keep crashing.
+const probeFailures = new Set();
 
 function setCacheDir(dir) {
   cacheDir = dir;
@@ -66,22 +70,25 @@ function probeMkv(filePath) {
     console.warn('[subtitles] SubtitleParser not available — matroska-subtitles export shape unexpected');
     return Promise.resolve([]);
   }
+  if (probeFailures.has(filePath)) return Promise.resolve([]);
+
   return new Promise((resolve) => {
     const tracks = [];
     let resolved = false;
-    let stream;
+    let source;
     let parser;
 
     const finish = () => {
       if (resolved) return;
       resolved = true;
-      try { stream && stream.destroy(); } catch {}
+      try { source && source.destroy(); } catch {}
+      try { parser && parser.destroy && parser.destroy(); } catch {}
       resolve(tracks);
     };
 
     try {
       parser = new SubtitleParser();
-      stream = fs.createReadStream(filePath);
+      source = fs.createReadStream(filePath);
     } catch (e) {
       console.error('[subtitles] probeMkv setup failed:', e.message);
       return finish();
@@ -92,22 +99,17 @@ function probeMkv(filePath) {
       // Give the parser a tiny moment in case extra track events follow, then bail
       setTimeout(finish, 100);
     });
-    parser.on('error', (e) => {
-      console.error('[subtitles] parser error during probe:', e.message);
-      finish();
-    });
-    stream.on('error', (e) => {
-      console.error('[subtitles] stream error during probe:', e.message);
-      finish();
-    });
-    stream.on('end', finish);
 
-    try {
-      stream.pipe(parser);
-    } catch (e) {
-      console.error('[subtitles] pipe failed:', e.message);
-      return finish();
-    }
+    // stream.pipeline catches synchronous throws in _transform (like the
+    // ebml-stream readVInt errors on malformed MKV) and turns them into a
+    // single error callback instead of an uncaughtException that kills the app.
+    pipeline(source, parser, (err) => {
+      if (err) {
+        console.warn('[subtitles] probeMkv pipeline error for', path.basename(filePath), '—', err.message);
+        probeFailures.add(filePath);
+      }
+      finish();
+    });
 
     // Safety timeout — some files have tracks deep into the header
     setTimeout(finish, 60000);
@@ -116,21 +118,32 @@ function probeMkv(filePath) {
 
 function extractMkvSub(filePath, trackNumber) {
   if (!SubtitleParser) return Promise.resolve([]);
-  return new Promise((resolve, reject) => {
+  if (probeFailures.has(filePath)) return Promise.resolve([]);
+
+  return new Promise((resolve) => {
     const cues = [];
-    let parser, stream;
+    let source;
+    let parser;
+
     try {
       parser = new SubtitleParser();
-      stream = fs.createReadStream(filePath);
-    } catch (e) { return reject(e); }
+      source = fs.createReadStream(filePath);
+    } catch (e) {
+      console.error('[subtitles] extractMkvSub setup failed:', e.message);
+      return resolve([]);
+    }
 
     parser.on('subtitle', (sub, trackN) => {
       if (trackN === trackNumber) cues.push(sub);
     });
-    parser.on('error', reject);
-    stream.on('error', reject);
-    stream.on('end', () => resolve(cues));
-    stream.pipe(parser);
+
+    pipeline(source, parser, (err) => {
+      if (err) {
+        console.warn('[subtitles] extractMkvSub pipeline error for', path.basename(filePath), '—', err.message);
+        probeFailures.add(filePath);
+      }
+      resolve(cues);
+    });
   });
 }
 

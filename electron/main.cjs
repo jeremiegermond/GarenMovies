@@ -13,6 +13,18 @@ const ffmpeg = require('./server/ffmpeg.cjs');
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
 
+// Safety net: third-party libraries (matroska-subtitles via ebml-stream, etc.)
+// can throw synchronously from inside Transform._write on malformed input.
+// Those throws bypass per-stream .on('error') handlers and would otherwise
+// crash the Electron main process with a modal error dialog. We log and keep
+// running — actual logic-level errors should still be caught at their source.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
 let mainWindow = null;
 let serverInfo = null;
 
