@@ -17,3 +17,6 @@ release/
 
 # Claude Code local settings
 .claude/
+
+# Local scratchpad
+requete.txt
