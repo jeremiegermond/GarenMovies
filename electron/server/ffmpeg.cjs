@@ -76,6 +76,10 @@ async function probeFile(filePath) {
   if (!isAvailable()) return null;
   const r = await spawnProbe([
     '-v', 'quiet',
+    '-fflags', '+ignidx+discardcorrupt',
+    '-err_detect', 'ignore_err',
+    '-analyzeduration', '100M',
+    '-probesize', '100M',
     '-print_format', 'json',
     '-show_format',
     '-show_streams',
@@ -121,12 +125,23 @@ function probeDuration(filePath) {
 }
 
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
-  // -fflags +genpts: regenerate presentation timestamps when source has gaps
-  // -avoid_negative_ts make_zero: shift negative starting timestamps to 0
-  // -af aresample=async=1000: keep audio aligned with video (up to ~20 ms
-  //   drift correction at 48 kHz) — fixes the 'audio out of sync' issue on
-  //   AC-3 / DTS sources after re-encoding to AAC.
-  const args = ['-y', '-fflags', '+genpts', '-i', inputPath];
+  // Input flags — must come BEFORE -i:
+  //   +genpts: regenerate presentation timestamps when source has gaps
+  //   +discardcorrupt: drop corrupted frames instead of bailing
+  //   +nofillin: don't try to fill in missing timestamps with guesses
+  //   +ignidx: regenerate the index instead of trusting an incorrect one
+  // -err_detect ignore_err: keep going on minor demuxer errors (PSA HEVC,
+  //   weird BDRip mkvs with non-standard EBML extensions, etc.)
+  // -analyzeduration / -probesize 200M: read enough of the file upfront so
+  //   ffmpeg correctly identifies stream parameters on files with sparse
+  //   keyframes
+  const inputExt = (path.extname(inputPath).slice(1) || '').toLowerCase();
+  const args = ['-y'];
+  args.push('-fflags', '+genpts+discardcorrupt+nofillin+ignidx');
+  args.push('-err_detect', 'ignore_err');
+  args.push('-analyzeduration', '200M', '-probesize', '200M');
+  if (inputExt === 'mkv') args.push('-f', 'matroska');
+  args.push('-i', inputPath);
   args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
   args.push('-c:v', 'copy');
   if (options.videoTag) args.push('-tag:v', options.videoTag);

@@ -151,9 +151,10 @@ async function probeAllAudioTracks(items) {
 }
 
 app.whenReady().then(async () => {
-  // v2: bumped after switching ffmpeg flags (+genpts / async resample /
-  // avoid_negative_ts) to invalidate old remuxes that were causing A/V drift.
-  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v2');
+  // v3: bumped after adding lenient demuxer flags (-err_detect ignore_err,
+  // +discardcorrupt+nofillin+ignidx, forced matroska demuxer) so files that
+  // failed at the EBML stage now get a fresh remux with the new pipeline.
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v3');
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
