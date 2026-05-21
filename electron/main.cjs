@@ -152,10 +152,10 @@ async function probeAllAudioTracks(items) {
 }
 
 app.whenReady().then(async () => {
-  // v3: bumped after adding lenient demuxer flags (-err_detect ignore_err,
-  // +discardcorrupt+nofillin+ignidx, forced matroska demuxer) so files that
-  // failed at the EBML stage now get a fresh remux with the new pipeline.
-  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v3');
+  // v4: bumped after simplifying the ffmpeg flag set (dropped -af aresample
+  // and aggressive demuxer flags that were producing broken cached files).
+  // Old caches at v2/v3 will sit unused; user can delete them manually.
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v4');
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
 
   // Log helper-tool availability so we know what's at our disposal.

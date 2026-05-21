@@ -125,28 +125,26 @@ function probeDuration(filePath) {
 }
 
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
-  // Input flags — must come BEFORE -i:
-  //   +genpts: regenerate presentation timestamps when source has gaps
+  // Minimal, conservative flag set. Each flag earns its place:
+  //   +genpts: regenerate PTS for sources with gaps (common in MKV)
   //   +discardcorrupt: drop corrupted frames instead of bailing
-  //   +nofillin: don't try to fill in missing timestamps with guesses
-  //   +ignidx: regenerate the index instead of trusting an incorrect one
-  // -err_detect ignore_err: keep going on minor demuxer errors (PSA HEVC,
-  //   weird BDRip mkvs with non-standard EBML extensions, etc.)
-  // -analyzeduration / -probesize 200M: read enough of the file upfront so
-  //   ffmpeg correctly identifies stream parameters on files with sparse
-  //   keyframes
-  const inputExt = (path.extname(inputPath).slice(1) || '').toLowerCase();
+  //   -err_detect ignore_err: keep going on minor demuxer errors
+  //   -analyzeduration 100M / -probesize 100M: read enough of the file to
+  //     correctly identify stream parameters on inputs with sparse keyframes
+  //   -avoid_negative_ts make_zero: clamp negative starting timestamps
+  //   -movflags +faststart: moov atom up front for HTTP streaming
+  //   -tag:v hvc1 (HEVC only): MP4 codec tag browsers expect
+  // We deliberately do NOT use +ignidx, +nofillin, -af aresample,
+  // -f matroska — they helped a couple of edge cases but broke more.
   const args = ['-y'];
-  args.push('-fflags', '+genpts+discardcorrupt+nofillin+ignidx');
+  args.push('-fflags', '+genpts+discardcorrupt');
   args.push('-err_detect', 'ignore_err');
-  args.push('-analyzeduration', '200M', '-probesize', '200M');
-  if (inputExt === 'mkv') args.push('-f', 'matroska');
+  args.push('-analyzeduration', '100M', '-probesize', '100M');
   args.push('-i', inputPath);
   args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
   args.push('-c:v', 'copy');
   if (options.videoTag) args.push('-tag:v', options.videoTag);
-  args.push('-c:a', 'aac', '-b:a', '192k');
-  args.push('-af', 'aresample=async=1000:first_pts=0');
+  args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
   args.push('-movflags', '+faststart');
   args.push('-avoid_negative_ts', 'make_zero');
   args.push('-max_muxing_queue_size', '9999');
