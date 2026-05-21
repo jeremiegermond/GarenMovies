@@ -1,6 +1,6 @@
 {
   "name": "garenmovies",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Watch-party desktop app — host movies locally, friends join via room code",
   "main": "electron/main.cjs",
   "author": "garenmovies",
