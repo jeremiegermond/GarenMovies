@@ -75,6 +75,7 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
       'vlc://quit'
     ];
 
+    console.log('[vlc] spawning:', vlcPath, args.map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
     const proc = spawn(vlcPath, args, { windowsHide: true });
     let stderrTail = '';
 
@@ -83,12 +84,14 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
     });
 
     proc.on('exit', (code) => {
-      const ok = code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+      let stat = null;
+      try { stat = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null; } catch {}
+      const ok = code === 0 && stat && stat.size > 50_000;
       if (ok) {
         resolve();
       } else {
         try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
-        reject(new Error(`vlc exit ${code}: ${stderrTail.slice(-400)}`));
+        reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${stderrTail.slice(-400)}`));
       }
     });
 

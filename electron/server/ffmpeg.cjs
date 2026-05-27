@@ -165,6 +165,7 @@ function remuxWithAudio(inputPath, audioIdx, outputPath, options = {}, onProgres
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
     const args = buildRemuxArgs(inputPath, audioIdx, outputPath, options);
+    console.log('[ffmpeg] spawning:', ffmpegPath, args.map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
     let stderrTail = '';
 
@@ -178,12 +179,19 @@ function remuxWithAudio(inputPath, audioIdx, outputPath, options = {}, onProgres
     });
 
     proc.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
+      if (code !== 0) {
         try { fs.unlinkSync(outputPath); } catch {}
-        reject(new Error(`ffmpeg exit ${code}: ${stderrTail.slice(-400)}`));
+        return reject(new Error(`ffmpeg exit ${code}: ${stderrTail.slice(-400)}`));
       }
+      // Validate output — ffmpeg sometimes exits 0 with an empty/tiny file
+      // when the encoder silently failed (e.g. unsupported audio codec input).
+      let stat;
+      try { stat = fs.statSync(outputPath); } catch { stat = null; }
+      if (!stat || stat.size < 50_000) { // <50 KB for a video = definitely garbage
+        try { fs.unlinkSync(outputPath); } catch {}
+        return reject(new Error(`ffmpeg produced empty/tiny output (${stat ? stat.size : 0} bytes). Tail of stderr:\n${stderrTail.slice(-600)}`));
+      }
+      resolve();
     });
     proc.on('error', (e) => {
       try { fs.unlinkSync(outputPath); } catch {}
