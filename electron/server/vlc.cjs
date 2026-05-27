@@ -40,22 +40,26 @@ function quoteForSout(p) {
 }
 
 /**
- * Remux a video to MP4 (H.264-or-copied video + AAC audio) using VLC as the
- * demuxer. We use this as a fallback when ffmpeg's libavformat refuses the
- * input (PSA HEVC releases with non-standard EBML headers, etc.) — VLC's
- * libVLC demuxer is more permissive than ffmpeg's.
+ * Remux a video to MP4 using VLC as the demuxer. Used as a fallback when
+ * ffmpeg's libavformat refuses the input (PSA HEVC releases with non-standard
+ * EBML headers, etc.) — libVLC's demuxer is more permissive.
  *
- * Audio is always re-encoded to AAC stereo so the result plays in browsers.
- * Video is passed through unchanged.
+ * options.videoMode: 'copy' | 'transcode'. Copy passes the video through
+ * unchanged; transcode re-encodes to H.264 (slow but works for browsers
+ * without HEVC hardware decoding).
  */
-function remuxWithVLC(inputPath, audioIdx, outputPath) {
+function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
   const vlcPath = findVLC();
   if (!vlcPath) return Promise.reject(new Error('VLC introuvable sur le système'));
 
   return new Promise((resolve, reject) => {
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
-    const sout = `#transcode{acodec=mp4a,ab=192,channels=2,samplerate=48000}:standard{access=file,mux=mp4,dst="${quoteForSout(outputPath)}"}`;
+    const videoMode = options.videoMode || 'copy';
+    const transcodeChain = videoMode === 'transcode'
+      ? '#transcode{vcodec=h264,vb=4000,acodec=mp4a,ab=192,channels=2,samplerate=48000}'
+      : '#transcode{acodec=mp4a,ab=192,channels=2,samplerate=48000}';
+    const sout = `${transcodeChain}:standard{access=file,mux=mp4,dst="${quoteForSout(outputPath)}"}`;
 
     const args = [
       '-I', 'dummy',

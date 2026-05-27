@@ -21,16 +21,22 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const [hasOSKey, setHasOSKey] = useState(false);
   const [defaultSubLang, setDefaultSubLang] = useState('fr');
 
-  // ── Audio state machine ──
-  // The player's job is to decide which URL to give to <video>:
-  //   - raw `src`               when audioIdx === 0 AND we believe track 0 plays raw
-  //   - `src?audio=N`            when audioIdx > 0 (server-side remux of track N)
-  //   - `src?audio=0&force=1`    when audioIdx === 0 but raw playback failed
-  // `prep` tracks the server-side remux job; the video element is unmounted
-  // (URL = null) whenever prep is needed but not yet 'ready'.
+  // ── Audio + video playback state machine ──
+  //
+  //   mode = 'raw'        → URL = src              (browser plays the file as-is)
+  //   mode = 'remux'      → URL = src?audio=N[&force=1] (audio re-encoded, video copied)
+  //   mode = 'transcode'  → URL = src?audio=N&force=1&transcode=1 (audio AAC + video H.264)
+  //
+  // Modes escalate automatically on <video> errors:
+  //   raw       —onError→ remux       (codec/container Chromium can't read)
+  //   remux     —onError→ transcode   (Chromium can't decode the copied video, e.g. HEVC w/o HW)
+  //   transcode —onError→ videoError  (give up, show overlay with Retry)
+  //
+  // `prep` tracks the server-side job for the current mode; the video element
+  // is unmounted (URL = null) whenever prep is required but not yet 'ready'.
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [audioIdx, setAudioIdx] = useState(0);
-  const [needsRemux, setNeedsRemux] = useState(false); // track 0 needs the cached remux
+  const [mode, setMode] = useState('raw'); // 'raw' | 'remux' | 'transcode'
   const [prep, setPrep] = useState(null); // null | { status, progress, duration, tool, error }
   const [videoError, setVideoError] = useState(null);
 
@@ -48,17 +54,16 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   }, [streamBase, mediaId]);
 
   // Compute the URL to feed to <video>.
-  //   - If we need a remux and prep isn't ready yet → null (video unmounts,
-  //     overlay shows)
-  //   - Otherwise pick the right URL based on (audioIdx, needsRemux)
-  const wantsRemux = audioIdx > 0 || needsRemux;
+  //   raw   → src as-is (no prep needed)
+  //   else  → src?audio=N[&force=1][&transcode=1], but only once prep is ready
   let effectiveSrc = null;
   if (src && !videoError) {
-    if (!wantsRemux) {
+    if (mode === 'raw') {
       effectiveSrc = src;
     } else if (prep?.status === 'ready') {
       const params = [`audio=${audioIdx}`];
-      if (needsRemux && audioIdx === 0) params.push('force=1');
+      if (audioIdx === 0) params.push('force=1');
+      if (mode === 'transcode') params.push('transcode=1');
       const sep = src.includes('?') ? '&' : '?';
       effectiveSrc = `${src}${sep}${params.join('&')}`;
     }
@@ -73,7 +78,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setShowSubSearch(false);
     setShowAudioMenu(false);
     setAudioIdx(0);
-    setNeedsRemux(false);
+    setMode('raw');
     setPrep(null);
     setVideoError(null);
     setSubOffset(0);
@@ -84,30 +89,29 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
 
-  // When the audio probe finishes (or refreshes), update needsRemux for
-  // track 0 based on whether the source codec is browser-playable.
+  // When the audio probe completes, if track 0's codec is non-browser-playable,
+  // promote mode from 'raw' to 'remux'. We never demote (e.g. if we've already
+  // escalated to 'transcode', stay there).
   useEffect(() => {
     if (audioTracks.length === 0) return;
-    if (audioIdx !== 0) return; // user picked a non-default track; let that path handle prep
+    if (audioIdx !== 0) return;
+    if (mode !== 'raw') return;
     const def = audioTracks[0];
-    const detected = def?.rawPlayable === false;
-    if (detected !== needsRemux) {
-      setNeedsRemux(detected);
-      // A change here means we need to (re)evaluate prep
+    if (def?.rawPlayable === false) {
+      setMode('remux');
       setPrep(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaId, audioTracks, audioIdx]);
+  }, [mediaId, audioTracks, audioIdx, mode]);
 
-  // Trigger prep whenever we need a remux but don't have a job yet.
-  // We deliberately skip 'error' (would loop) — the user retries via the
-  // overlay button, which clears `prep` back to null.
+  // Trigger prep whenever mode requires it. Skip 'error' to avoid loops —
+  // the user retries via the overlay button which clears `prep`.
   useEffect(() => {
-    if (!wantsRemux) return;
+    if (mode === 'raw') return;
     if (prep?.status === 'running' || prep?.status === 'ready' || prep?.status === 'error') return;
-    runPrep(audioIdx, needsRemux && audioIdx === 0);
+    runPrep(audioIdx, mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaId, audioIdx, needsRemux, wantsRemux, prep?.status]);
+  }, [mediaId, audioIdx, mode, prep?.status]);
 
   // Apply selected subtitle. Tracks may load async after src changes — we listen
   // to addtrack/change events, plus retry a few times to handle race conditions.
@@ -244,77 +248,80 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(idx);
   }
 
-  // Drive the server-side remux job for (idx, force). Polls /status until
-  // ready or errored. A pollToken stamp lets the reset effect cancel any
-  // in-flight poll cleanly (older tokens silently stop).
-  async function runPrep(idx, force) {
+  // Drive the server-side prep job. A pollToken stamp lets the reset effect
+  // cancel any in-flight poll cleanly (older tokens silently stop).
+  async function runPrep(idx, requestedMode) {
     const token = ++pollTokenRef.current;
-    setPrep({ status: 'running', progress: 0, duration: 0, tool: 'ffmpeg' });
-    const statusQuery = force ? '?force=1' : '';
+    setPrep({ status: 'running', progress: 0, duration: 0, tool: 'ffmpeg', mode: requestedMode });
+    const statusQuery = requestedMode === 'transcode' ? '?transcode=1' : '';
     try {
       const r = await fetch(`${streamBase}/api/audio/prepare`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mediaId, audioIdx: idx, force })
+        body: JSON.stringify({ mediaId, audioIdx: idx, mode: requestedMode })
       });
       if (token !== pollTokenRef.current) return;
       const init = await r.json();
       if (token !== pollTokenRef.current) return;
-      if (init.status === 'ready') { setPrep({ status: 'ready' }); return; }
+      if (init.status === 'ready') { setPrep({ status: 'ready', mode: requestedMode }); return; }
       if (init.status === 'error') {
-        setPrep({ status: 'error', error: init.error || 'Erreur', tool: init.tool });
+        setPrep({ status: 'error', error: init.error || 'Erreur', tool: init.tool, mode: requestedMode });
         return;
       }
-      setPrep({ status: 'running', progress: 0, duration: 0, tool: init.tool });
+      setPrep({ status: 'running', progress: 0, duration: 0, tool: init.tool, mode: requestedMode });
       const poll = async () => {
         if (token !== pollTokenRef.current) return;
         try {
           const sr = await fetch(`${streamBase}/api/audio/status/${mediaId}/${idx}${statusQuery}`);
           if (token !== pollTokenRef.current) return;
           const data = await sr.json();
-          if (data.status === 'ready') { setPrep({ status: 'ready' }); return; }
+          if (data.status === 'ready') { setPrep({ status: 'ready', mode: requestedMode }); return; }
           if (data.status === 'error') {
-            setPrep({ status: 'error', error: data.error || 'Erreur', tool: data.tool });
+            setPrep({ status: 'error', error: data.error || 'Erreur', tool: data.tool, mode: requestedMode });
             return;
           }
-          setPrep({ status: 'running', progress: data.progress || 0, duration: data.duration || 0, tool: data.tool });
+          setPrep({ status: 'running', progress: data.progress || 0, duration: data.duration || 0, tool: data.tool, mode: requestedMode });
           setTimeout(poll, 1000);
         } catch (e) {
-          if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message });
+          if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message, mode: requestedMode });
         }
       };
       poll();
     } catch (e) {
-      if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message });
+      if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message, mode: requestedMode });
     }
   }
 
   function onVideoError(e) {
     const err = e?.currentTarget?.error;
     const code = err?.code;
-    console.warn('[video] error code', code, err?.message);
-    // Codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
-    // Code 1 means the src was changed mid-load (e.g. we just kicked off a
-    // remux flow) — ignore, the new src will load fine.
+    console.warn('[video] error', code, err?.message, '— current mode:', mode);
+    // Codes: 1=ABORTED (we just changed src), 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
     if (code === 1) return;
-    // If we were playing raw on track 0 and the source/decoder rejected it,
-    // switch to the cached remux path. This handles HEVC-without-hvc1,
-    // AVI/WMV/FLV containers, etc.
-    if (audioIdx === 0 && !needsRemux && (code === 2 || code === 3 || code === 4)) {
-      console.warn('[video] raw playback failed → trying server-side remux');
-      // Preserve playback position
-      const v = videoRef.current;
-      if (v) {
-        pendingSeekRef.current = v.currentTime;
-        wasPlayingRef.current = !v.paused;
-      }
-      setNeedsRemux(true);
-      setPrep(null); // forces the prep effect to re-trigger
+    if (code !== 2 && code !== 3 && code !== 4) return;
+
+    // Preserve playback position before the reload
+    const v = videoRef.current;
+    if (v) {
+      pendingSeekRef.current = v.currentTime;
+      wasPlayingRef.current = !v.paused;
+    }
+
+    if (mode === 'raw') {
+      console.warn('[video] raw failed → escalating to remux');
+      setMode('remux');
+      setPrep(null);
       return;
     }
-    let label = 'Lecture impossible';
-    if (code === 3) label = 'Codec vidéo non supporté par le navigateur';
-    else if (code === 4) label = 'Source non lisible (conteneur ou codec rejeté)';
+    if (mode === 'remux') {
+      console.warn('[video] remux failed → escalating to transcode (slow)');
+      setMode('transcode');
+      setPrep(null);
+      return;
+    }
+    let label = 'Lecture impossible même après transcodage';
+    if (code === 3) label = 'Codec vidéo rejeté par le navigateur';
+    else if (code === 4) label = 'Source non lisible';
     else if (code === 2) label = 'Erreur réseau';
     setVideoError(label);
   }
@@ -323,7 +330,6 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setShowAudioMenu(false);
     if (idx === audioIdx) return;
 
-    // Preserve playback position + play state across the reload
     const v = videoRef.current;
     if (v) {
       pendingSeekRef.current = v.currentTime;
@@ -332,20 +338,21 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
     setVideoError(null);
     setAudioIdx(idx);
-    setPrep(null); // re-evaluate prep for the new track
+    setPrep(null);
 
-    // If user is going back to default (idx 0), re-derive needsRemux from
-    // the source's first audio codec so we don't keep a stale force flag.
     if (idx === 0) {
       const def = audioTracks[0];
-      setNeedsRemux(def?.rawPlayable === false);
+      setMode(def?.rawPlayable === false ? 'remux' : 'raw');
+    } else {
+      // Non-default audio always needs at least a remux
+      setMode('remux');
     }
   }
 
   function retryAfterError() {
     setVideoError(null);
     setPrep(null);
-    setNeedsRemux(false);
+    setMode('raw');
     setAudioIdx(0);
   }
 
@@ -365,7 +372,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     ? Math.min(100, Math.round((prep.progress / prep.duration) * 100))
     : null;
 
-  const showPrepOverlay = wantsRemux && prep?.status === 'running';
+  const showPrepOverlay = mode !== 'raw' && prep?.status === 'running';
   const showPrepError = prep?.status === 'error';
   const showVideoError = !!videoError && !showPrepOverlay && !showPrepError;
 
@@ -410,13 +417,18 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         <div className="player-prep-overlay">
           <Loader2 size={36} strokeWidth={1.75} className="spin" />
           <div className="prep-title">
-            {prep.tool === 'vlc' ? 'Préparation via VLC' : "Préparation de l'audio"}
+            {mode === 'transcode'
+              ? 'Transcodage vidéo en H.264'
+              : prep.tool === 'vlc' ? 'Préparation via VLC' : "Préparation de l'audio"}
           </div>
           <div className="prep-subtitle">
             {audioTracks[audioIdx]?.label || `Piste ${audioIdx}`}
-            {prep.tool === 'vlc' && ' · fichier non standard, ffmpeg a refusé'}
+            {mode === 'transcode' && ' · escalade après échec du remux'}
+            {mode !== 'transcode' && prep.tool === 'vlc' && ' · fichier non standard, ffmpeg a refusé'}
           </div>
-          {prep.tool === 'vlc' ? (
+          {mode === 'transcode' ? (
+            <div className="prep-pct">Le transcodage prend ~le temps réel — patience.</div>
+          ) : prep.tool === 'vlc' ? (
             <div className="prep-pct">Cela peut prendre quelques minutes — VLC ne donne pas de pourcentage</div>
           ) : (
             <>

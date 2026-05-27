@@ -95,24 +95,25 @@ function broadcastCatalog() {
 
 function getState() { return projectedState(); }
 
-function audioCachePath(mediaId, audioIdx) {
+function audioCachePath(mediaId, audioIdx, mode = 'remux') {
   if (!audioCacheDir) return null;
-  return path.join(audioCacheDir, `${mediaId}-a${audioIdx}.mp4`);
+  const suffix = mode === 'transcode' ? '-tx' : '';
+  return path.join(audioCacheDir, `${mediaId}-a${audioIdx}${suffix}.mp4`);
 }
 
-function jobKey(mediaId, audioIdx) {
-  return `${mediaId}:${audioIdx}`;
+function jobKey(mediaId, audioIdx, mode = 'remux') {
+  return `${mediaId}:${audioIdx}:${mode}`;
 }
 
-async function startRemuxJob(media, audioIdx) {
-  const key = jobKey(media.id, audioIdx);
+async function startRemuxJob(media, audioIdx, mode = 'remux') {
+  const key = jobKey(media.id, audioIdx, mode);
   const existing = remuxJobs.get(key);
   if (existing && existing.status === 'running') return existing;
 
-  const cachedPath = audioCachePath(media.id, audioIdx);
+  const cachedPath = audioCachePath(media.id, audioIdx, mode);
   if (!cachedPath) throw new Error('audio cache directory not configured');
   if (fs.existsSync(cachedPath)) {
-    const job = { status: 'ready', progress: 1, duration: 1, tool: 'cache' };
+    const job = { status: 'ready', progress: 1, duration: 1, tool: 'cache', mode };
     remuxJobs.set(key, job);
     return job;
   }
@@ -122,7 +123,8 @@ async function startRemuxJob(media, audioIdx) {
     progress: 0,
     duration: media.duration || 0,
     startedAt: Date.now(),
-    tool: 'ffmpeg'
+    tool: 'ffmpeg',
+    mode
   };
   remuxJobs.set(key, job);
 
@@ -131,14 +133,17 @@ async function startRemuxJob(media, audioIdx) {
   }
 
   // Try ffmpeg first (fast, supports our HEVC tag), fall back to VLC if the
-  // input is too non-standard for libavformat (PSA HEVC, BDRips with custom
-  // EBML, etc.) — libVLC's demuxer is more forgiving.
+  // input is too non-standard for libavformat — libVLC's demuxer is more
+  // forgiving. videoMode tells both tools whether to copy video or transcode
+  // it to H.264 (the latter is slow but works for browsers without HEVC HW).
   (async () => {
-    const videoTag = ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
-    const opts = videoTag ? { videoTag } : {};
+    const videoMode = mode === 'transcode' ? 'transcode' : 'copy';
+    const videoTag = videoMode === 'copy' && ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
+    const ffmpegOpts = { videoMode };
+    if (videoTag) ffmpegOpts.videoTag = videoTag;
 
     try {
-      await ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, opts, (sec) => {
+      await ffmpeg.remuxWithAudio(media.source.path, audioIdx, cachedPath, ffmpegOpts, (sec) => {
         job.progress = sec;
       });
       job.status = 'ready';
@@ -153,12 +158,11 @@ async function startRemuxJob(media, audioIdx) {
         try { fs.unlinkSync(cachedPath); } catch {}
         return;
       }
-      // VLC fallback — slower (no progress events) but handles weird inputs
-      console.warn('[remux] falling back to VLC for', path.basename(media.source.path));
+      console.warn('[remux] falling back to VLC for', path.basename(media.source.path), `(mode=${mode})`);
       job.tool = 'vlc';
       job.progress = 0; // reset; VLC doesn't give progress
       try {
-        await vlc.remuxWithVLC(media.source.path, audioIdx, cachedPath);
+        await vlc.remuxWithVLC(media.source.path, audioIdx, cachedPath, { videoMode });
         job.status = 'ready';
         if (job.duration > 0) job.progress = job.duration;
       } catch (vlcErr) {
@@ -199,45 +203,48 @@ function startServer(port, opts = {}) {
       if (!m) return res.status(404).end('Unknown media');
       const audio = req.query.audio != null ? parseInt(req.query.audio, 10) : null;
       const force = req.query.force === '1';
+      const transcode = req.query.transcode === '1';
 
       // No query → raw file (browser plays first audio track natively)
       if (audio == null) return streamMedia(req, res, m);
 
-      // ?audio=0 + track 0 raw-playable + no force → still serve raw, no remux
-      if (!force && audio === 0 && m.audioTracks?.[0]?.rawPlayable) {
+      // ?audio=0 + track 0 raw-playable + no force/transcode → still serve raw
+      if (!force && !transcode && audio === 0 && m.audioTracks?.[0]?.rawPlayable) {
         return streamMedia(req, res, m);
       }
 
-      // Otherwise we need the cached remuxed file
-      const cachedPath = audioCachePath(m.id, audio);
+      // Otherwise we need the cached file matching this (audio, mode) combo
+      const mode = transcode ? 'transcode' : 'remux';
+      const cachedPath = audioCachePath(m.id, audio, mode);
       if (cachedPath && fs.existsSync(cachedPath)) {
         return streamMedia(req, res, {
           source: { type: 'local', path: cachedPath, ext: 'mp4' }
         });
       }
-      return res.status(409).end('Audio track not yet prepared — POST /api/audio/prepare first');
+      return res.status(409).end('Not yet prepared — POST /api/audio/prepare first');
     });
 
     app.post('/api/audio/prepare', async (req, res) => {
-      const { mediaId, audioIdx, force } = req.body || {};
+      const { mediaId, audioIdx, mode = 'remux' } = req.body || {};
       const m = getMedia(mediaId);
       if (!m) return res.status(404).json({ error: 'Unknown media' });
       if (audioIdx == null) return res.status(400).json({ error: 'audioIdx required' });
 
       const idx = parseInt(audioIdx, 10);
-      // Track 0 with raw-playable codec needs no remux UNLESS the client asks
-      // for a force remux (e.g. because raw playback failed on its side).
-      if (!force && idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
-        return res.json({ status: 'ready', noRemux: true });
+      // Track 0 with raw-playable codec needs no prep at all when we're in
+      // 'remux' mode (transcode always wants a fresh job).
+      if (mode === 'remux' && idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
+        return res.json({ status: 'ready', noRemux: true, mode });
       }
       if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
       try {
-        const job = await startRemuxJob(m, idx);
+        const job = await startRemuxJob(m, idx, mode);
         res.json({
           status: job.status,
           progress: job.progress,
           duration: job.duration,
           tool: job.tool,
+          mode: job.mode,
           error: job.error
         });
       } catch (e) {
@@ -249,23 +256,25 @@ function startServer(port, opts = {}) {
       const audioIdx = parseInt(req.params.audioIdx, 10);
       const mediaId = req.params.mediaId;
       const m = getMedia(mediaId);
-      const force = req.query.force === '1';
-      if (!force && audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
-        return res.json({ status: 'ready', noRemux: true });
+      const transcode = req.query.transcode === '1';
+      const mode = transcode ? 'transcode' : 'remux';
+      if (mode === 'remux' && audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
+        return res.json({ status: 'ready', noRemux: true, mode });
       }
-      const cachedPath = audioCachePath(mediaId, audioIdx);
-      if (cachedPath && fs.existsSync(cachedPath)) return res.json({ status: 'ready' });
-      const job = remuxJobs.get(jobKey(mediaId, audioIdx));
+      const cachedPath = audioCachePath(mediaId, audioIdx, mode);
+      if (cachedPath && fs.existsSync(cachedPath)) return res.json({ status: 'ready', mode });
+      const job = remuxJobs.get(jobKey(mediaId, audioIdx, mode));
       if (job) {
         return res.json({
           status: job.status,
           progress: job.progress,
           duration: job.duration,
           tool: job.tool,
+          mode: job.mode,
           error: job.error
         });
       }
-      res.json({ status: 'idle' });
+      res.json({ status: 'idle', mode });
     });
 
     app.get('/api/subs/providers', (_req, res) => {

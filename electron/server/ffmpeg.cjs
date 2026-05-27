@@ -30,10 +30,17 @@ try {
   ffmpegPath = require('ffmpeg-static');
   if (ffmpegPath) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
 } catch { /* optional */ }
+// Prefer @ffprobe-installer (ffprobe 2023+, handles modern HEVC 10-bit MKVs)
+// over ffprobe-static which ships an outdated 4.0.2 build from 2018.
 try {
-  const fp = require('ffprobe-static');
+  const fp = require('@ffprobe-installer/ffprobe');
   ffprobePath = fp.path.replace('app.asar', 'app.asar.unpacked');
-} catch { /* optional */ }
+} catch {
+  try {
+    const fp = require('ffprobe-static');
+    ffprobePath = fp.path.replace('app.asar', 'app.asar.unpacked');
+  } catch { /* none available */ }
+}
 
 function isAvailable() {
   return !!ffmpegPath && !!ffprobePath && fs.existsSync(ffmpegPath) && fs.existsSync(ffprobePath);
@@ -125,25 +132,24 @@ function probeDuration(filePath) {
 }
 
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
-  // Minimal, conservative flag set. Each flag earns its place:
-  //   +genpts: regenerate PTS for sources with gaps (common in MKV)
-  //   +discardcorrupt: drop corrupted frames instead of bailing
-  //   -err_detect ignore_err: keep going on minor demuxer errors
-  //   -analyzeduration 100M / -probesize 100M: read enough of the file to
-  //     correctly identify stream parameters on inputs with sparse keyframes
-  //   -avoid_negative_ts make_zero: clamp negative starting timestamps
-  //   -movflags +faststart: moov atom up front for HTTP streaming
-  //   -tag:v hvc1 (HEVC only): MP4 codec tag browsers expect
-  // We deliberately do NOT use +ignidx, +nofillin, -af aresample,
-  // -f matroska — they helped a couple of edge cases but broke more.
+  // options.videoMode: 'copy' (default, fast) | 'transcode' (libx264, slow but
+  // guaranteed-playable in browsers that don't have HEVC HW decoding).
+  const videoMode = options.videoMode || 'copy';
   const args = ['-y'];
   args.push('-fflags', '+genpts+discardcorrupt');
   args.push('-err_detect', 'ignore_err');
   args.push('-analyzeduration', '100M', '-probesize', '100M');
   args.push('-i', inputPath);
   args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
-  args.push('-c:v', 'copy');
-  if (options.videoTag) args.push('-tag:v', options.videoTag);
+  if (videoMode === 'transcode') {
+    // veryfast preset trades a bit of size for ~real-time encoding on a
+    // modern CPU. yuv420p ensures 8-bit output (browsers can't decode 10-bit
+    // H.264).
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p');
+  } else {
+    args.push('-c:v', 'copy');
+    if (options.videoTag) args.push('-tag:v', options.videoTag);
+  }
   args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
   args.push('-movflags', '+faststart');
   args.push('-avoid_negative_ts', 'make_zero');
