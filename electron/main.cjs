@@ -182,6 +182,9 @@ app.whenReady().then(async () => {
   } else {
     console.log('[vlc] not detected (install https://www.videolan.org/ for malformed-MKV fallback)');
   }
+  // Pre-warm HW encoder detection so the first transcode doesn't pay the
+  // -encoders / -hwaccels probe latency.
+  ffmpeg.detectHwInfo().catch(() => {});
   metadata.setCachePath(path.join(app.getPath('userData'), 'metadata-cache.json'));
   subtitles.setCacheDir(path.join(app.getPath('userData'), 'subs-cache'));
   subtitleDownloader.setDownloadDir(path.join(app.getPath('userData'), 'downloaded-subs'));

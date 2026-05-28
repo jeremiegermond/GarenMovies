@@ -327,8 +327,17 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   }
 
   function activateAudioTrack(idx) {
+    console.log('[Player] activateAudioTrack', {
+      from: audioIdx,
+      to: idx,
+      track: audioTracks[idx],
+      previousMode: mode
+    });
     setShowAudioMenu(false);
-    if (idx === audioIdx) return;
+    if (idx === audioIdx) {
+      console.log('[Player] activateAudioTrack: no-op (already on this track)');
+      return;
+    }
 
     const v = videoRef.current;
     if (v) {
@@ -342,9 +351,11 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
     if (idx === 0) {
       const def = audioTracks[0];
-      setMode(def?.rawPlayable === false ? 'remux' : 'raw');
+      const next = def?.rawPlayable === false ? 'remux' : 'raw';
+      console.log('[Player] activateAudioTrack: idx 0, setting mode →', next);
+      setMode(next);
     } else {
-      // Non-default audio always needs at least a remux
+      console.log('[Player] activateAudioTrack: idx > 0, setting mode → remux');
       setMode('remux');
     }
   }

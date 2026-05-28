@@ -46,6 +46,48 @@ function isAvailable() {
   return !!ffmpegPath && !!ffprobePath && fs.existsSync(ffmpegPath) && fs.existsSync(ffprobePath);
 }
 
+// One-shot detection of the fastest available H.264 encoder + matching HW
+// decode path. NVENC on Nvidia is ~15-30x faster than libx264 for 1080p
+// HEVC->H.264 transcoding; QSV on Intel and AMF on AMD are similar wins.
+let cachedHwInfo = undefined;
+async function detectHwInfo() {
+  if (cachedHwInfo !== undefined) return cachedHwInfo;
+  if (!ffmpegPath) return (cachedHwInfo = { encoder: 'libx264', hwaccel: null });
+  const encoders = await new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ['-hide_banner', '-encoders'], { windowsHide: true });
+    let out = '';
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('exit', () => resolve(out));
+    proc.on('error', () => resolve(''));
+    setTimeout(() => { try { proc.kill(); } catch {} resolve(out); }, 5000);
+  });
+  const hwaccels = await new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ['-hide_banner', '-hwaccels'], { windowsHide: true });
+    let out = '';
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('exit', () => resolve(out));
+    proc.on('error', () => resolve(''));
+    setTimeout(() => { try { proc.kill(); } catch {} resolve(out); }, 5000);
+  });
+  // Preference: nvenc (Nvidia) → qsv (Intel) → amf (AMD) → software
+  let encoder = 'libx264';
+  let hwaccel = null;
+  if (/\bh264_nvenc\b/.test(encoders)) {
+    encoder = 'h264_nvenc';
+    if (/\bcuda\b/.test(hwaccels)) hwaccel = 'cuda';
+  } else if (/\bh264_qsv\b/.test(encoders)) {
+    encoder = 'h264_qsv';
+    if (/\bqsv\b/.test(hwaccels)) hwaccel = 'qsv';
+    else if (/\bd3d11va\b/.test(hwaccels)) hwaccel = 'd3d11va';
+  } else if (/\bh264_amf\b/.test(encoders)) {
+    encoder = 'h264_amf';
+    if (/\bd3d11va\b/.test(hwaccels)) hwaccel = 'd3d11va';
+  }
+  cachedHwInfo = { encoder, hwaccel };
+  console.log('[ffmpeg] HW transcode pipeline:', JSON.stringify(cachedHwInfo));
+  return cachedHwInfo;
+}
+
 function isAudioRawPlayable(codec) {
   return RAW_PLAYABLE_AUDIO.has(String(codec || '').toLowerCase());
 }
@@ -132,23 +174,53 @@ function probeDuration(filePath) {
 }
 
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
-  // options.videoMode: 'copy' (default, fast) | 'transcode' (libx264, slow but
-  // guaranteed-playable in browsers that don't have HEVC HW decoding).
-  // options.sourceAudioCodec: if 'aac', we'll -c:a copy instead of re-encoding.
+  // options.videoMode: 'copy' | 'transcode'
+  // options.sourceAudioCodec: 'aac' lets us -c:a copy (10× faster, lossless)
+  // options.hwEncoder + options.hwaccel: pick the best HW pipeline if any
   const videoMode = options.videoMode || 'copy';
   const sourceAudioCodec = (options.sourceAudioCodec || '').toLowerCase();
+  const hwEncoder = options.hwEncoder || 'libx264';
+  const hwaccel = options.hwaccel || null;
+
   const args = ['-y'];
   args.push('-fflags', '+genpts+discardcorrupt');
   args.push('-err_detect', 'ignore_err');
   args.push('-analyzeduration', '100M', '-probesize', '100M');
+
+  // Hardware-accelerated decode (must come BEFORE -i). On Nvidia + NVENC, this
+  // lets the GPU decode HEVC and feed frames straight into the H.264 encoder
+  // without round-tripping through system RAM — biggest perf win available.
+  if (videoMode === 'transcode' && hwaccel) {
+    args.push('-hwaccel', hwaccel);
+    if (hwEncoder === 'h264_nvenc' && hwaccel === 'cuda') {
+      args.push('-hwaccel_output_format', 'cuda');
+    } else if (hwEncoder === 'h264_qsv' && hwaccel === 'qsv') {
+      args.push('-hwaccel_output_format', 'qsv');
+    }
+  }
+
   args.push('-i', inputPath);
   args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
+
   if (videoMode === 'transcode') {
-    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p');
+    if (hwEncoder === 'h264_nvenc') {
+      // p4 = "balanced" preset, CQ 23 ≈ visually transparent at 1080p
+      args.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '23', '-b:v', '0');
+      if (!hwaccel) args.push('-pix_fmt', 'yuv420p');
+    } else if (hwEncoder === 'h264_qsv') {
+      args.push('-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '23');
+      if (!hwaccel) args.push('-pix_fmt', 'nv12');
+    } else if (hwEncoder === 'h264_amf') {
+      args.push('-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23');
+      args.push('-pix_fmt', 'yuv420p');
+    } else {
+      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p');
+    }
   } else {
     args.push('-c:v', 'copy');
     if (options.videoTag) args.push('-tag:v', options.videoTag);
   }
+
   if (sourceAudioCodec === 'aac') {
     args.push('-c:a', 'copy');
   } else {
@@ -220,6 +292,7 @@ module.exports = {
   isAvailable,
   isAudioRawPlayable,
   isHEVC,
+  detectHwInfo,
   probeFile,
   probeAudioTracks,
   probeDuration,

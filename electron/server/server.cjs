@@ -145,10 +145,19 @@ async function startRemuxJob(media, audioIdx, mode = 'remux') {
   (async () => {
     const videoMode = mode === 'transcode' ? 'transcode' : 'copy';
     const videoTag = videoMode === 'copy' && ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
-    // Pass the source audio codec so ffmpeg can `-c:a copy` when it's already
-    // AAC (10x faster, no quality loss).
     const sourceAudioCodec = media.audioTracks?.[audioIdx]?.codec;
-    const ffmpegOpts = { videoMode, sourceAudioCodec };
+    // For transcode, plug in whichever HW H.264 encoder is available on this
+    // machine (NVENC / QSV / AMF, with matching HW decode when possible).
+    let hwInfo = { encoder: 'libx264', hwaccel: null };
+    if (videoMode === 'transcode') {
+      try { hwInfo = await ffmpeg.detectHwInfo(); } catch {}
+    }
+    const ffmpegOpts = {
+      videoMode,
+      sourceAudioCodec,
+      hwEncoder: hwInfo.encoder,
+      hwaccel: hwInfo.hwaccel
+    };
     if (videoTag) ffmpegOpts.videoTag = videoTag;
 
     try {
