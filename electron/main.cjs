@@ -152,10 +152,9 @@ async function probeAllAudioTracks(items) {
 }
 
 app.whenReady().then(async () => {
-  // v4: bumped after simplifying the ffmpeg flag set (dropped -af aresample
-  // and aggressive demuxer flags that were producing broken cached files).
-  // Old caches at v2/v3 will sit unused; user can delete them manually.
-  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v4');
+  // v5: bumped to invalidate any cached files that may have been produced by
+  // earlier builds without the output-size validation in remuxWithAudio.
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v5');
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
 
   // Log helper-tool availability so we know what's at our disposal.

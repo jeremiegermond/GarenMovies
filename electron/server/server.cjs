@@ -106,13 +106,19 @@ function jobKey(mediaId, audioIdx, mode = 'remux') {
 }
 
 async function startRemuxJob(media, audioIdx, mode = 'remux') {
+  console.log('[remux] startRemuxJob', { id: media.id, file: path.basename(media.source.path), audioIdx, mode });
   const key = jobKey(media.id, audioIdx, mode);
   const existing = remuxJobs.get(key);
-  if (existing && existing.status === 'running') return existing;
+  if (existing && existing.status === 'running') {
+    console.log('[remux] reusing in-flight job', key);
+    return existing;
+  }
 
   const cachedPath = audioCachePath(media.id, audioIdx, mode);
   if (!cachedPath) throw new Error('audio cache directory not configured');
   if (fs.existsSync(cachedPath)) {
+    const sizeKB = Math.round(fs.statSync(cachedPath).size / 1024);
+    console.log('[remux] cache hit', path.basename(cachedPath), `(${sizeKB} KB)`);
     const job = { status: 'ready', progress: 1, duration: 1, tool: 'cache', mode };
     remuxJobs.set(key, job);
     return job;

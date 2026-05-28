@@ -81,19 +81,19 @@ function spawnProbe(args) {
 
 async function probeFile(filePath) {
   if (!isAvailable()) return null;
+  // -v error: print errors so we can diagnose failures (was -v quiet which
+  // hid them). Dropped -fflags/-err_detect/-analyzeduration which were
+  // probably making ffprobe reject some files; defaults are fine.
   const r = await spawnProbe([
-    '-v', 'quiet',
-    '-fflags', '+ignidx+discardcorrupt',
-    '-err_detect', 'ignore_err',
-    '-analyzeduration', '100M',
-    '-probesize', '100M',
+    '-v', 'error',
     '-print_format', 'json',
     '-show_format',
     '-show_streams',
     filePath
   ]);
   if (r.code !== 0) {
-    console.warn('[ffprobe] file probe exit', r.code, r.stderr.slice(-200));
+    console.warn('[ffprobe] file probe exit', r.code, 'for', path.basename(filePath));
+    if (r.stderr) console.warn('[ffprobe] stderr:', r.stderr.slice(-500));
     return null;
   }
   let data;
