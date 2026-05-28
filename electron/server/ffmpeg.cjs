@@ -134,7 +134,9 @@ function probeDuration(filePath) {
 function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
   // options.videoMode: 'copy' (default, fast) | 'transcode' (libx264, slow but
   // guaranteed-playable in browsers that don't have HEVC HW decoding).
+  // options.sourceAudioCodec: if 'aac', we'll -c:a copy instead of re-encoding.
   const videoMode = options.videoMode || 'copy';
+  const sourceAudioCodec = (options.sourceAudioCodec || '').toLowerCase();
   const args = ['-y'];
   args.push('-fflags', '+genpts+discardcorrupt');
   args.push('-err_detect', 'ignore_err');
@@ -142,15 +144,16 @@ function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
   args.push('-i', inputPath);
   args.push('-map', '0:v:0', '-map', `0:a:${audioIdx}`);
   if (videoMode === 'transcode') {
-    // veryfast preset trades a bit of size for ~real-time encoding on a
-    // modern CPU. yuv420p ensures 8-bit output (browsers can't decode 10-bit
-    // H.264).
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p');
   } else {
     args.push('-c:v', 'copy');
     if (options.videoTag) args.push('-tag:v', options.videoTag);
   }
-  args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+  if (sourceAudioCodec === 'aac') {
+    args.push('-c:a', 'copy');
+  } else {
+    args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+  }
   args.push('-movflags', '+faststart');
   args.push('-avoid_negative_ts', 'make_zero');
   args.push('-max_muxing_queue_size', '9999');

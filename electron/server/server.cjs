@@ -145,7 +145,10 @@ async function startRemuxJob(media, audioIdx, mode = 'remux') {
   (async () => {
     const videoMode = mode === 'transcode' ? 'transcode' : 'copy';
     const videoTag = videoMode === 'copy' && ffmpeg.isHEVC(media.videoCodec) ? 'hvc1' : null;
-    const ffmpegOpts = { videoMode };
+    // Pass the source audio codec so ffmpeg can `-c:a copy` when it's already
+    // AAC (10x faster, no quality loss).
+    const sourceAudioCodec = media.audioTracks?.[audioIdx]?.codec;
+    const ffmpegOpts = { videoMode, sourceAudioCodec };
     if (videoTag) ffmpegOpts.videoTag = videoTag;
 
     try {
@@ -237,12 +240,11 @@ function startServer(port, opts = {}) {
       if (audioIdx == null) return res.status(400).json({ error: 'audioIdx required' });
 
       const idx = parseInt(audioIdx, 10);
-      // Track 0 with raw-playable codec needs no prep at all when we're in
-      // 'remux' mode (transcode always wants a fresh job).
-      if (mode === 'remux' && idx === 0 && m.audioTracks?.[0]?.rawPlayable) {
-        return res.json({ status: 'ready', noRemux: true, mode });
-      }
       if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
+      // No rawPlayable short-circuit here: the client only POSTs prepare when
+      // it actually needs a cached MP4 (mode='remux' after raw failed, or
+      // audioIdx>0, or mode='transcode'). Short-circuiting to 'ready' without
+      // producing the cache file made /api/stream return 409 to the player.
       try {
         const job = await startRemuxJob(m, idx, mode);
         res.json({
@@ -261,12 +263,8 @@ function startServer(port, opts = {}) {
     app.get('/api/audio/status/:mediaId/:audioIdx', (req, res) => {
       const audioIdx = parseInt(req.params.audioIdx, 10);
       const mediaId = req.params.mediaId;
-      const m = getMedia(mediaId);
       const transcode = req.query.transcode === '1';
       const mode = transcode ? 'transcode' : 'remux';
-      if (mode === 'remux' && audioIdx === 0 && m?.audioTracks?.[0]?.rawPlayable) {
-        return res.json({ status: 'ready', noRemux: true, mode });
-      }
       const cachedPath = audioCachePath(mediaId, audioIdx, mode);
       if (cachedPath && fs.existsSync(cachedPath)) return res.json({ status: 'ready', mode });
       const job = remuxJobs.get(jobKey(mediaId, audioIdx, mode));
