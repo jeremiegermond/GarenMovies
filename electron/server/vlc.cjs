@@ -65,7 +65,6 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
       '-I', 'dummy',
       '--no-video-title-show',
       '--no-osd',
-      '--quiet',
       // VLC counts audio-track per ES (elementary stream). 0 = default.
       // For our purposes, audioIdx is 0-based among audio streams, which
       // generally maps to VLC's expectation.
@@ -78,20 +77,31 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
     console.log('[vlc] spawning:', vlcPath, args.map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
     const proc = spawn(vlcPath, args, { windowsHide: true });
     let stderrTail = '';
+    let stdoutTail = '';
 
     proc.stderr.on('data', (d) => {
-      stderrTail = (stderrTail + d.toString()).slice(-2000);
+      const text = d.toString();
+      stderrTail = (stderrTail + text).slice(-2000);
+      // VLC mirrors most useful messages on stderr; surface them live so the
+      // user can see progress (and our "[vlc]" prefix makes them easy to grep)
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        if (/^\[\w+\b/.test(line)) console.log('[vlc]', line);
+      }
     });
+    proc.stdout.on('data', (d) => { stdoutTail = (stdoutTail + d.toString()).slice(-1000); });
 
     proc.on('exit', (code) => {
       let stat = null;
       try { stat = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null; } catch {}
       const ok = code === 0 && stat && stat.size > 50_000;
+      console.log('[vlc] exited code=' + code, 'output=' + (stat ? stat.size : 0) + 'B', ok ? '— OK' : '— FAILED');
       if (ok) {
         resolve();
       } else {
         try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
-        reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${stderrTail.slice(-400)}`));
+        const tail = (stderrTail || stdoutTail).slice(-600);
+        reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${tail}`));
       }
     });
 

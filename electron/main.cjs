@@ -23,13 +23,21 @@ function truncate(s, n = 800) {
   if (typeof s !== 'string') s = String(s);
   return s.length > n ? s.slice(0, n) + ' …[truncated]' : s;
 }
+function isKnownNoise(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  // matroska-subtitles -> ebml-stream throws asynchronously after we close
+  // the source stream during subtitle probing. Already handled by the
+  // pipeline error path in subtitles.cjs — the async throw is harmless.
+  return msg.startsWith('Unrepresentable length: Infinity')
+    || msg.includes('Premature close');
+}
 process.on('uncaughtException', (err) => {
-  // matroska-subtitles / ebml-stream can throw 'Unrepresentable length' with
-  // thousands of trailing zero characters that flood the log; we truncate.
+  if (isKnownNoise(err)) return;
   const msg = err && err.stack ? err.stack : String(err);
   console.error('[uncaughtException]', truncate(msg));
 });
 process.on('unhandledRejection', (reason) => {
+  if (isKnownNoise(reason)) return;
   const msg = reason && reason.stack ? reason.stack : String(reason);
   console.error('[unhandledRejection]', truncate(msg));
 });
