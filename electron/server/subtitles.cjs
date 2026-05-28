@@ -104,7 +104,11 @@ function probeMkv(filePath) {
     // ebml-stream readVInt errors on malformed MKV) and turns them into a
     // single error callback instead of an uncaughtException that kills the app.
     pipeline(source, parser, (err) => {
-      if (err) {
+      // "Premature close" is expected here — we intentionally destroy the
+      // source stream as soon as the 'tracks' event fires, since we only
+      // need the header. Other errors (malformed EBML, etc.) mean the file
+      // is bad and we should remember not to retry.
+      if (err && !/premature close/i.test(err.message)) {
         console.warn('[subtitles] probeMkv pipeline error for', path.basename(filePath), '—', err.message);
         probeFailures.add(filePath);
       }

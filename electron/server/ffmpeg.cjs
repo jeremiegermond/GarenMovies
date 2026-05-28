@@ -167,7 +167,14 @@ function remuxWithAudio(inputPath, audioIdx, outputPath, options = {}, onProgres
   return new Promise((resolve, reject) => {
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
-    const args = buildRemuxArgs(inputPath, audioIdx, outputPath, options);
+    // Write to a .tmp sibling and atomic-rename on clean exit. If ffmpeg gets
+    // killed (Ctrl+C, parent process dies, crash…) we end up with a partial
+    // .tmp file that fails the "rename" step, so no broken `.mp4` ever
+    // appears in cache.
+    const tmpPath = outputPath + '.tmp';
+    try { fs.unlinkSync(tmpPath); } catch {}
+
+    const args = buildRemuxArgs(inputPath, audioIdx, tmpPath, options);
     console.log('[ffmpeg] spawning:', ffmpegPath, args.map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
     const proc = spawn(ffmpegPath, args, { windowsHide: true });
     let stderrTail = '';
@@ -183,21 +190,24 @@ function remuxWithAudio(inputPath, audioIdx, outputPath, options = {}, onProgres
 
     proc.on('exit', (code) => {
       if (code !== 0) {
-        try { fs.unlinkSync(outputPath); } catch {}
+        try { fs.unlinkSync(tmpPath); } catch {}
         return reject(new Error(`ffmpeg exit ${code}: ${stderrTail.slice(-400)}`));
       }
-      // Validate output — ffmpeg sometimes exits 0 with an empty/tiny file
-      // when the encoder silently failed (e.g. unsupported audio codec input).
       let stat;
-      try { stat = fs.statSync(outputPath); } catch { stat = null; }
-      if (!stat || stat.size < 50_000) { // <50 KB for a video = definitely garbage
-        try { fs.unlinkSync(outputPath); } catch {}
+      try { stat = fs.statSync(tmpPath); } catch { stat = null; }
+      if (!stat || stat.size < 50_000) {
+        try { fs.unlinkSync(tmpPath); } catch {}
         return reject(new Error(`ffmpeg produced empty/tiny output (${stat ? stat.size : 0} bytes). Tail of stderr:\n${stderrTail.slice(-600)}`));
       }
+      try { fs.renameSync(tmpPath, outputPath); } catch (e) {
+        try { fs.unlinkSync(tmpPath); } catch {}
+        return reject(new Error(`Cache rename failed: ${e.message}`));
+      }
+      console.log('[ffmpeg] done:', path.basename(outputPath), '(' + Math.round(stat.size / 1024 / 1024) + ' MB)');
       resolve();
     });
     proc.on('error', (e) => {
-      try { fs.unlinkSync(outputPath); } catch {}
+      try { fs.unlinkSync(tmpPath); } catch {}
       reject(e);
     });
   });

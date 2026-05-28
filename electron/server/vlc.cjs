@@ -55,11 +55,15 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
   return new Promise((resolve, reject) => {
     try { fs.mkdirSync(path.dirname(outputPath), { recursive: true }); } catch {}
 
+    // Same atomic-rename trick as ffmpeg: write to .tmp, rename on success.
+    const tmpPath = outputPath + '.tmp';
+    try { fs.unlinkSync(tmpPath); } catch {}
+
     const videoMode = options.videoMode || 'copy';
     const transcodeChain = videoMode === 'transcode'
       ? '#transcode{vcodec=h264,vb=4000,acodec=mp4a,ab=192,channels=2,samplerate=48000}'
       : '#transcode{acodec=mp4a,ab=192,channels=2,samplerate=48000}';
-    const sout = `${transcodeChain}:standard{access=file,mux=mp4,dst="${quoteForSout(outputPath)}"}`;
+    const sout = `${transcodeChain}:standard{access=file,mux=mp4,dst="${quoteForSout(tmpPath)}"}`;
 
     const args = [
       '-I', 'dummy',
@@ -93,20 +97,24 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
 
     proc.on('exit', (code) => {
       let stat = null;
-      try { stat = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null; } catch {}
+      try { stat = fs.existsSync(tmpPath) ? fs.statSync(tmpPath) : null; } catch {}
       const ok = code === 0 && stat && stat.size > 50_000;
       console.log('[vlc] exited code=' + code, 'output=' + (stat ? stat.size : 0) + 'B', ok ? '— OK' : '— FAILED');
       if (ok) {
+        try { fs.renameSync(tmpPath, outputPath); } catch (e) {
+          try { fs.unlinkSync(tmpPath); } catch {}
+          return reject(new Error(`Cache rename failed: ${e.message}`));
+        }
         resolve();
       } else {
-        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
         const tail = (stderrTail || stdoutTail).slice(-600);
         reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${tail}`));
       }
     });
 
     proc.on('error', (e) => {
-      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
       reject(e);
     });
   });

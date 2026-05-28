@@ -160,9 +160,19 @@ async function probeAllAudioTracks(items) {
 }
 
 app.whenReady().then(async () => {
-  // v5: bumped to invalidate any cached files that may have been produced by
-  // earlier builds without the output-size validation in remuxWithAudio.
-  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v5');
+  // v6: bumped to discard partial cache files left by earlier builds that
+  // didn't use the atomic-rename pattern (a Ctrl+C mid-encode left half-
+  // written .mp4s that passed the size check but had no moov atom).
+  const audioCacheDir = path.join(app.getPath('userData'), 'audio-cache-v6');
+  try { fs.mkdirSync(audioCacheDir, { recursive: true }); } catch {}
+  // Clean up any stale .tmp files (orphans from a previous crashed run).
+  try {
+    for (const name of fs.readdirSync(audioCacheDir)) {
+      if (name.endsWith('.tmp')) {
+        try { fs.unlinkSync(path.join(audioCacheDir, name)); console.log('[cache] removed orphan', name); } catch {}
+      }
+    }
+  } catch {}
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
 
   // Log helper-tool availability so we know what's at our disposal.
