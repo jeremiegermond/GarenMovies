@@ -1,6 +1,38 @@
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+let ffmpegPath = null;
+try {
+  ffmpegPath = require('ffmpeg-static');
+  if (ffmpegPath) ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+} catch {}
+
+// Move moov atom to the front of the file so the browser can start playing
+// before downloading the whole thing. VLC's mp4 muxer writes moov at the
+// end by default; this is a quick second pass (just stream copy, no
+// transcode), typically a few seconds even for big files.
+function faststartMp4(inputPath, outputPath) {
+  if (!ffmpegPath) return Promise.reject(new Error('ffmpeg-static unavailable for VLC faststart pass'));
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [
+      '-y', '-i', inputPath,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outputPath
+    ], { windowsHide: true });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr = (stderr + d.toString()).slice(-1000); });
+    proc.on('exit', (code) => {
+      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 50_000) {
+        resolve();
+      } else {
+        try { fs.unlinkSync(outputPath); } catch {}
+        reject(new Error(`faststart pass failed (exit ${code}): ${stderr.slice(-300)}`));
+      }
+    });
+    proc.on('error', reject);
+  });
+}
 
 // Standard VLC install paths on the major platforms.
 const WIN_PATHS = [
@@ -95,21 +127,35 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
     });
     proc.stdout.on('data', (d) => { stdoutTail = (stdoutTail + d.toString()).slice(-1000); });
 
-    proc.on('exit', (code) => {
+    proc.on('exit', async (code) => {
       let stat = null;
       try { stat = fs.existsSync(tmpPath) ? fs.statSync(tmpPath) : null; } catch {}
       const ok = code === 0 && stat && stat.size > 50_000;
       console.log('[vlc] exited code=' + code, 'output=' + (stat ? stat.size : 0) + 'B', ok ? '— OK' : '— FAILED');
-      if (ok) {
-        try { fs.renameSync(tmpPath, outputPath); } catch (e) {
-          try { fs.unlinkSync(tmpPath); } catch {}
-          return reject(new Error(`Cache rename failed: ${e.message}`));
-        }
-        resolve();
-      } else {
+      if (!ok) {
         try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
         const tail = (stderrTail || stdoutTail).slice(-600);
-        reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${tail}`));
+        return reject(new Error(`vlc exit ${code}, output ${stat ? stat.size : 0} bytes: ${tail}`));
+      }
+      // Apply ffmpeg faststart pass so the browser can start playing without
+      // downloading the whole VLC output (VLC writes moov atom at the end).
+      const fsPath = outputPath + '.fs.tmp';
+      try {
+        await faststartMp4(tmpPath, fsPath);
+        try { fs.unlinkSync(tmpPath); } catch {}
+        try { fs.renameSync(fsPath, outputPath); } catch (e) {
+          try { fs.unlinkSync(fsPath); } catch {}
+          return reject(new Error(`Cache rename failed: ${e.message}`));
+        }
+        console.log('[vlc] faststart applied, finalized', path.basename(outputPath));
+        resolve();
+      } catch (e) {
+        console.warn('[vlc] faststart pass failed —', e.message, '— falling back to non-faststart output');
+        try { fs.renameSync(tmpPath, outputPath); } catch (er) {
+          try { fs.unlinkSync(tmpPath); } catch {}
+          return reject(new Error(`Cache rename failed: ${er.message}`));
+        }
+        resolve();
       }
     });
 

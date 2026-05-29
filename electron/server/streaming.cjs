@@ -25,11 +25,14 @@ function streamLocal(req, res, mediaEntry) {
   const mime = MIME[ext] || 'application/octet-stream';
   const range = req.headers.range;
 
+  // no-store keeps the browser from caching a stale response across audio-
+  // track switches (different ?audio=N URLs should always re-fetch).
   if (!range) {
     res.writeHead(200, {
       'Content-Length': fileSize,
       'Content-Type': mime,
-      'Accept-Ranges': 'bytes'
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store'
     });
     fs.createReadStream(filePath).pipe(res);
     return;
@@ -49,7 +52,8 @@ function streamLocal(req, res, mediaEntry) {
     'Content-Range': `bytes ${start}-${end}/${fileSize}`,
     'Accept-Ranges': 'bytes',
     'Content-Length': chunkSize,
-    'Content-Type': mime
+    'Content-Type': mime,
+    'Cache-Control': 'no-store'
   });
   fs.createReadStream(filePath, { start, end }).pipe(res);
 }
