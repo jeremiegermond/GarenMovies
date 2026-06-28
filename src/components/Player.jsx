@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 
 const SYNC_THRESHOLD = 1.0;
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
+// HEVC (x265) is effectively never decodable by Electron's bundled Chromium,
+// so for those files we skip the doomed raw / remux-copy attempts and jump
+// straight to progressive HLS transcoding.
+const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
+function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
+
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
   const videoRef = useRef(null);
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
@@ -55,9 +62,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
   // Compute the URL to feed to <video>.
   //   raw   → src as-is (no prep needed)
+  //   hls   → no src attribute; hls.js attaches the playlist via MSE (effect)
   //   else  → src?audio=N[&force=1][&transcode=1], but only once prep is ready
   let effectiveSrc = null;
-  if (src && !videoError) {
+  if (src && !videoError && mode !== 'hls') {
     if (mode === 'raw') {
       effectiveSrc = src;
     } else if (prep?.status === 'ready') {
@@ -68,6 +76,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       effectiveSrc = `${src}${sep}${params.join('&')}`;
     }
   }
+  // hls.js drives the <video> element imperatively once the first segment is
+  // ready. We still render the element (so hls.js can attach) but set no src.
+  const hlsActive = mode === 'hls' && prep?.status === 'ready' && !videoError;
+  const hlsUrl = mediaId != null ? `${streamBase}/api/hls/${mediaId}/${audioIdx}/index.m3u8` : null;
 
   // Reset everything on media change.
   useEffect(() => {
@@ -89,20 +101,26 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
 
-  // When the audio probe completes, if track 0's codec is non-browser-playable,
-  // promote mode from 'raw' to 'remux'. We never demote (e.g. if we've already
-  // escalated to 'transcode', stay there).
+  // Decide the starting mode for the default audio track once probe data is in.
+  //   HEVC video        → 'hls'    (Chromium can't decode it; go progressive)
+  //   non-raw-playable  → 'remux'  (e.g. H.264 video + AC3 audio)
+  //   otherwise         → stay 'raw'
+  // We only ever promote (raw → …); never demote an already-escalated mode.
   useEffect(() => {
-    if (audioTracks.length === 0) return;
     if (audioIdx !== 0) return;
     if (mode !== 'raw') return;
-    const def = audioTracks[0];
-    if (def?.rawPlayable === false) {
+    if (isHevc(videoCodec)) {
+      setMode('hls');
+      setPrep(null);
+      return;
+    }
+    if (audioTracks.length === 0) return;
+    if (audioTracks[0]?.rawPlayable === false) {
       setMode('remux');
       setPrep(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaId, audioTracks, audioIdx, mode]);
+  }, [mediaId, audioTracks, audioIdx, mode, videoCodec]);
 
   // Trigger prep whenever mode requires it. Skip 'error' to avoid loops —
   // the user retries via the overlay button which clears `prep`.
@@ -211,6 +229,37 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setTimeout(() => { suppressRef.current = false; }, 50);
   }, [syncState, isHost]);
 
+  // Attach hls.js to the <video> once the first segment is ready. hls.js keeps
+  // re-reading the growing EVENT playlist, so playback starts immediately while
+  // the transcode (≈9× realtime) races ahead of the playhead.
+  useEffect(() => {
+    if (mode !== 'hls' || prep?.status !== 'ready') return;
+    const v = videoRef.current;
+    if (!v || !hlsUrl) return;
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, startPosition: 0, maxBufferLength: 30 });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (!data.fatal) return;
+        console.warn('[hls.js] fatal', data.type, data.details);
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { try { hls.startLoad(); return; } catch {} }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { try { hls.recoverMediaError(); return; } catch {} }
+        // Unrecoverable → fall back to the whole-file MP4 transcode path.
+        setMode('transcode'); setPrep(null);
+      });
+      return () => { try { hls.destroy(); } catch {} };
+    }
+    if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = hlsUrl; // native HLS (Safari) — not the Electron case
+      return;
+    }
+    // No HLS support at all → fall back to MP4 transcode.
+    setMode('transcode'); setPrep(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, prep?.status, hlsUrl]);
+
   function onLoadedMetadata() {
     const v = videoRef.current;
     if (!v) return;
@@ -248,9 +297,47 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(idx);
   }
 
+  // Drive the progressive-HLS prep job: kick off the transcode, then poll until
+  // the first segment is ready (typically <1s). Once ready, the hls.js effect
+  // attaches the growing playlist to the <video> element.
+  async function runHlsPrep(idx) {
+    const token = ++pollTokenRef.current;
+    setPrep({ status: 'running', progress: 0, duration: 0, tool: 'hls', mode: 'hls' });
+    try {
+      const r = await fetch(`${streamBase}/api/hls/prepare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId, audioIdx: idx })
+      });
+      if (token !== pollTokenRef.current) return;
+      const init = await r.json();
+      if (token !== pollTokenRef.current) return;
+      if (init.error) { setPrep({ status: 'error', error: init.error, tool: 'hls', mode: 'hls' }); return; }
+      if (init.ready) { setPrep({ status: 'ready', tool: 'hls', mode: 'hls' }); return; }
+      const poll = async () => {
+        if (token !== pollTokenRef.current) return;
+        try {
+          const sr = await fetch(`${streamBase}/api/hls/status/${mediaId}/${idx}`);
+          if (token !== pollTokenRef.current) return;
+          const data = await sr.json();
+          if (data.error) { setPrep({ status: 'error', error: data.error, tool: 'hls', mode: 'hls' }); return; }
+          if (data.ready) { setPrep({ status: 'ready', tool: 'hls', mode: 'hls' }); return; }
+          setPrep({ status: 'running', progress: 0, duration: data.duration || 0, tool: 'hls', mode: 'hls' });
+          setTimeout(poll, 600);
+        } catch (e) {
+          if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message, tool: 'hls', mode: 'hls' });
+        }
+      };
+      poll();
+    } catch (e) {
+      if (token === pollTokenRef.current) setPrep({ status: 'error', error: e.message, tool: 'hls', mode: 'hls' });
+    }
+  }
+
   // Drive the server-side prep job. A pollToken stamp lets the reset effect
   // cancel any in-flight poll cleanly (older tokens silently stop).
   async function runPrep(idx, requestedMode) {
+    if (requestedMode === 'hls') return runHlsPrep(idx);
     const token = ++pollTokenRef.current;
     setPrep({ status: 'running', progress: 0, duration: 0, tool: 'ffmpeg', mode: requestedMode });
     const statusQuery = requestedMode === 'transcode' ? '?transcode=1' : '';
@@ -296,6 +383,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     const err = e?.currentTarget?.error;
     const code = err?.code;
     console.warn('[video] error', code, err?.message, '— current mode:', mode);
+    // hls.js owns error handling/recovery while it drives the element via MSE.
+    if (mode === 'hls') return;
     // Codes: 1=ABORTED (we just changed src), 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
     if (code === 1) return;
     if (code !== 2 && code !== 3 && code !== 4) return;
@@ -308,14 +397,16 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     }
 
     if (mode === 'raw') {
-      console.warn('[video] raw failed → escalating to remux');
-      setMode('remux');
+      // HEVC → straight to progressive HLS; everything else → try a remux first.
+      const next = isHevc(videoCodec) ? 'hls' : 'remux';
+      console.warn('[video] raw failed → escalating to', next);
+      setMode(next);
       setPrep(null);
       return;
     }
     if (mode === 'remux') {
-      console.warn('[video] remux failed → escalating to transcode (slow)');
-      setMode('transcode');
+      console.warn('[video] remux failed → escalating to progressive HLS');
+      setMode('hls');
       setPrep(null);
       return;
     }
@@ -349,15 +440,18 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setAudioIdx(idx);
     setPrep(null);
 
-    if (idx === 0) {
-      const def = audioTracks[0];
-      const next = def?.rawPlayable === false ? 'remux' : 'raw';
-      console.log('[Player] activateAudioTrack: idx 0, setting mode →', next);
-      setMode(next);
+    let next;
+    if (isHevc(videoCodec)) {
+      // Video needs transcoding regardless of which audio track — go HLS, which
+      // re-muxes the chosen audio into the segments anyway.
+      next = 'hls';
+    } else if (idx === 0) {
+      next = audioTracks[0]?.rawPlayable === false ? 'remux' : 'raw';
     } else {
-      console.log('[Player] activateAudioTrack: idx > 0, setting mode → remux');
-      setMode('remux');
+      next = 'remux';
     }
+    console.log('[Player] activateAudioTrack: setting mode →', next);
+    setMode(next);
   }
 
   function retryAfterError() {
@@ -389,10 +483,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
   return (
     <div className="player-wrap">
-      {effectiveSrc ? (
+      {(effectiveSrc || hlsActive) ? (
         <video
           ref={videoRef}
-          src={effectiveSrc}
+          src={effectiveSrc || undefined}
           controls={isHost}
           autoPlay={false}
           crossOrigin="anonymous"
@@ -428,16 +522,21 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         <div className="player-prep-overlay">
           <Loader2 size={36} strokeWidth={1.75} className="spin" />
           <div className="prep-title">
-            {mode === 'transcode'
+            {mode === 'hls'
+              ? 'Démarrage du flux…'
+              : mode === 'transcode'
               ? 'Transcodage vidéo en H.264'
               : prep.tool === 'vlc' ? 'Préparation via VLC' : "Préparation de l'audio"}
           </div>
           <div className="prep-subtitle">
             {audioTracks[audioIdx]?.label || `Piste ${audioIdx}`}
+            {mode === 'hls' && ' · lecture progressive (transcodage à la volée)'}
             {mode === 'transcode' && ' · escalade après échec du remux'}
-            {mode !== 'transcode' && prep.tool === 'vlc' && ' · fichier non standard, ffmpeg a refusé'}
+            {mode !== 'transcode' && mode !== 'hls' && prep.tool === 'vlc' && ' · fichier non standard, ffmpeg a refusé'}
           </div>
-          {mode === 'transcode' ? (
+          {mode === 'hls' ? (
+            <div className="prep-pct">Préparation du premier segment — quelques secondes…</div>
+          ) : mode === 'transcode' ? (
             <div className="prep-pct">Le transcodage prend ~le temps réel — patience.</div>
           ) : prep.tool === 'vlc' ? (
             <div className="prep-pct">Cela peut prendre quelques minutes — VLC ne donne pas de pourcentage</div>

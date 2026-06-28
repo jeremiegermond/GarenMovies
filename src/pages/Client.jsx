@@ -189,6 +189,7 @@ export default function Client({ onLeave }) {
                   syncState={syncState}
                   subs={activeMedia?.subs || []}
                   audioTracks={activeMedia?.audioTracks || []}
+                  videoCodec={activeMedia?.videoCodec || null}
                   streamBase={streamBase}
                   mediaId={activeId}
                   mediaTitle={activeMedia?.title}

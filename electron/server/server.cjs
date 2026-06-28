@@ -9,6 +9,7 @@ const subtitles = require('./subtitles.cjs');
 const subtitleDownloader = require('./subtitle-downloader.cjs');
 const ffmpeg = require('./ffmpeg.cjs');
 const vlc = require('./vlc.cjs');
+const hls = require('./hls.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
 
 // Patterns that indicate ffmpeg couldn't even parse the input container —
@@ -114,6 +115,14 @@ async function startRemuxJob(media, audioIdx, mode = 'remux') {
     return existing;
   }
 
+  if (ffmpeg.isLikelyCorrupt(media.source.path)) {
+    console.warn('[remux] file looks corrupt (leading zeros):', path.basename(media.source.path));
+    const job = { status: 'error', tool: 'none', mode,
+      error: 'Fichier vide ou corrompu — téléchargement probablement incomplet. Re-télécharge ce fichier.' };
+    remuxJobs.set(key, job);
+    return job;
+  }
+
   const cachedPath = audioCachePath(media.id, audioIdx, mode);
   if (!cachedPath) throw new Error('audio cache directory not configured');
   if (fs.existsSync(cachedPath)) {
@@ -199,6 +208,8 @@ function startServer(port, opts = {}) {
   audioCacheDir = opts.audioCacheDir || null;
   if (audioCacheDir) {
     try { fs.mkdirSync(audioCacheDir, { recursive: true }); } catch {}
+    // HLS segment dirs live alongside the MP4 audio cache.
+    hls.setCacheDir(audioCacheDir);
   }
 
   return new Promise((resolve, reject) => {
@@ -288,6 +299,50 @@ function startServer(port, opts = {}) {
         });
       }
       res.json({ status: 'idle', mode });
+    });
+
+    // ── Progressive HLS transcoding ──
+    // The fast "streaming-site" path: transcode to HLS segments and start
+    // playing as soon as the first ~4s segment lands (<1s), instead of waiting
+    // for a whole-file MP4 transcode. Additive — the MP4 modes above still work.
+
+    app.post('/api/hls/prepare', async (req, res) => {
+      const { mediaId, audioIdx } = req.body || {};
+      const m = getMedia(mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      if (audioIdx == null) return res.status(400).json({ error: 'audioIdx required' });
+      if (!ffmpeg.isAvailable()) return res.status(501).json({ error: 'ffmpeg unavailable' });
+      try {
+        await hls.startJob(m, parseInt(audioIdx, 10));
+        res.json(hls.getStatus(m.id, parseInt(audioIdx, 10)));
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    app.get('/api/hls/status/:mediaId/:audioIdx', (req, res) => {
+      res.json(hls.getStatus(req.params.mediaId, parseInt(req.params.audioIdx, 10)));
+    });
+
+    app.get('/api/hls/:mediaId/:audioIdx/index.m3u8', (req, res) => {
+      const pl = hls.playlistPath(req.params.mediaId, parseInt(req.params.audioIdx, 10));
+      if (!pl || !fs.existsSync(pl)) return res.status(404).end('playlist not ready');
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-store');
+      fs.createReadStream(pl).pipe(res);
+    });
+
+    app.get('/api/hls/:mediaId/:audioIdx/:segment', (req, res) => {
+      const seg = req.params.segment;
+      // Only allow our own segment filenames — never an arbitrary path.
+      if (!/^seg_\d{5}\.ts$/.test(seg)) return res.status(400).end('bad segment');
+      const dir = hls.hlsDir(req.params.mediaId, parseInt(req.params.audioIdx, 10));
+      if (!dir) return res.status(404).end('no cache');
+      const segPath = path.join(dir, seg);
+      if (!fs.existsSync(segPath)) return res.status(404).end('segment not found');
+      res.setHeader('Content-Type', 'video/mp2t');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      fs.createReadStream(segPath).pipe(res);
     });
 
     app.get('/api/subs/providers', (_req, res) => {

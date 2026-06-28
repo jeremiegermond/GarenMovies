@@ -46,6 +46,28 @@ function isAvailable() {
   return !!ffmpegPath && !!ffprobePath && fs.existsSync(ffmpegPath) && fs.existsSync(ffprobePath);
 }
 
+// Cheap corruption sniff: a real media file never starts with kilobytes of
+// zeros. Incomplete torrent downloads (file preallocated to its final size,
+// pieces never arrived) look exactly like this — and ffmpeg/VLC then fail with
+// a cryptic "EBML header parsing failed". Catch it early to show a clear error.
+function isLikelyCorrupt(filePath) {
+  let fd;
+  try {
+    const sz = fs.statSync(filePath).size;
+    if (sz === 0) return true;
+    fd = fs.openSync(filePath, 'r');
+    const len = Math.min(4096, sz);
+    const buf = Buffer.alloc(len);
+    const n = fs.readSync(fd, buf, 0, len, 0);
+    for (let i = 0; i < n; i++) if (buf[i] !== 0) return false;
+    return true; // leading 4 KB all zero → not a real file
+  } catch {
+    return false; // can't tell → let ffmpeg/VLC try
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
 // One-shot detection of the fastest available H.264 encoder + matching HW
 // decode path. NVENC on Nvidia is ~15-30x faster than libx264 for 1080p
 // HEVC->H.264 transcoding; QSV on Intel and AMF on AMD are similar wins.
@@ -204,6 +226,12 @@ function buildRemuxArgs(inputPath, audioIdx, outputPath, options = {}) {
 
   if (videoMode === 'transcode') {
     if (hwEncoder === 'h264_nvenc') {
+      // NVENC's H.264 encoder can't accept 10-bit frames (most modern x265
+      // releases are Main 10 / yuv420p10le). When decoding on the GPU
+      // (-hwaccel_output_format cuda), insert scale_cuda to downconvert to
+      // 8-bit yuv420p on-GPU before the encoder — without this ffmpeg dies
+      // with "10 bit encode not supported". Harmless no-op for 8-bit sources.
+      if (hwaccel === 'cuda') args.push('-vf', 'scale_cuda=format=yuv420p');
       // p4 = "balanced" preset, CQ 23 ≈ visually transparent at 1080p
       args.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '23', '-b:v', '0');
       if (!hwaccel) args.push('-pix_fmt', 'yuv420p');
@@ -290,6 +318,7 @@ function getFfprobePath() { return ffprobePath; }
 
 module.exports = {
   isAvailable,
+  isLikelyCorrupt,
   isAudioRawPlayable,
   isHEVC,
   detectHwInfo,

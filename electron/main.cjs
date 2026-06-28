@@ -10,6 +10,7 @@ const subtitles = require('./server/subtitles.cjs');
 const subtitleDownloader = require('./server/subtitle-downloader.cjs');
 const ffmpeg = require('./server/ffmpeg.cjs');
 const vlc = require('./server/vlc.cjs');
+const hls = require('./server/hls.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -174,6 +175,8 @@ app.whenReady().then(async () => {
     }
   } catch {}
   serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
+  // Drop partial HLS segment dirs from a previous run (keep complete ones warm).
+  hls.sweepPartials();
 
   // Log helper-tool availability so we know what's at our disposal.
   console.log('[ffmpeg]', ffmpeg.isAvailable() ? 'OK' : 'MISSING');
@@ -211,6 +214,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', async () => {
+  hls.stopAll();
   await tunnel.stop();
   if (process.platform !== 'darwin') app.quit();
 });

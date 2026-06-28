@@ -220,6 +220,7 @@ export default function Host({ onLeave }) {
                   onHostStateChange={pushHostState}
                   subs={activeMedia?.subs || []}
                   audioTracks={activeMedia?.audioTracks || []}
+                  videoCodec={activeMedia?.videoCodec || null}
                   streamBase={streamBase}
                   mediaId={activeId}
                   mediaTitle={activeMedia?.title}
