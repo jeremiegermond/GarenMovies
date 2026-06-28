@@ -53,9 +53,11 @@ function findVLC() {
   } else {
     for (const p of LINUX_PATHS) if (fs.existsSync(p)) return (cached = p);
   }
-  // Fall back to PATH lookup
+  // Fall back to PATH lookup. `--version` makes VLC pop a modal dialog on
+  // Windows that blocks spawnSync forever, so cap it with a timeout — if it
+  // doesn't answer fast, treat VLC as not-on-PATH rather than freezing the app.
   try {
-    const r = spawnSync('vlc', ['--version'], { windowsHide: true, encoding: 'utf-8' });
+    const r = spawnSync('vlc', ['--version'], { windowsHide: true, encoding: 'utf-8', timeout: 2000 });
     if (r.status === 0) return (cached = 'vlc');
   } catch {}
   return (cached = null);
@@ -166,11 +168,14 @@ function remuxWithVLC(inputPath, audioIdx, outputPath, options = {}) {
   });
 }
 
+// WARNING: on Windows `vlc.exe --version` opens a modal dialog and blocks
+// until it's dismissed, so spawnSync would hang the caller forever. Never call
+// this on the main-process startup path. The timeout is a safety net only.
 function getVLCVersion() {
   const vlcPath = findVLC();
   if (!vlcPath) return null;
   try {
-    const r = spawnSync(vlcPath, ['--version'], { windowsHide: true, encoding: 'utf-8' });
+    const r = spawnSync(vlcPath, ['--version'], { windowsHide: true, encoding: 'utf-8', timeout: 2000 });
     const m = r.stdout?.match(/VLC version ([0-9.]+)/);
     return m ? m[1] : null;
   } catch { return null; }

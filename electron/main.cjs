@@ -179,9 +179,12 @@ app.whenReady().then(async () => {
   hls.sweepPartials();
 
   // Log helper-tool availability so we know what's at our disposal.
+  // NOTE: do NOT call vlc.getVLCVersion() here — `vlc.exe --version` pops a
+  // modal dialog on Windows and blocks the spawnSync (and thus the whole main
+  // process event loop) forever, so the window never opens. Path is enough.
   console.log('[ffmpeg]', ffmpeg.isAvailable() ? 'OK' : 'MISSING');
   if (vlc.isAvailable()) {
-    console.log('[vlc] fallback available at', vlc.findVLC(), '— version', vlc.getVLCVersion() || '?');
+    console.log('[vlc] fallback available at', vlc.findVLC());
   } else {
     console.log('[vlc] not detected (install https://www.videolan.org/ for malformed-MKV fallback)');
   }
