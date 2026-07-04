@@ -1,6 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Electron 32+ removed File.path; this is the supported way to get the real
+  // filesystem path of a drag-and-dropped file.
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   getServerInfo: () => ipcRenderer.invoke('server:info'),
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
@@ -18,5 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('tunnel:url', handler);
       return () => ipcRenderer.removeListener('tunnel:url', handler);
     }
+  },
+  torrents: {
+    search: (query) => ipcRenderer.invoke('torrents:search', query),
+    openMagnet: (magnet) => ipcRenderer.invoke('torrents:open-magnet', magnet),
+    openFile: (filePath) => ipcRenderer.invoke('torrents:open-file', filePath),
+    addVideos: (paths) => ipcRenderer.invoke('torrents:add-videos', paths)
   }
 });

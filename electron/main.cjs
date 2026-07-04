@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -11,6 +11,7 @@ const subtitleDownloader = require('./server/subtitle-downloader.cjs');
 const ffmpeg = require('./server/ffmpeg.cjs');
 const vlc = require('./server/vlc.cjs');
 const hls = require('./server/hls.cjs');
+const torrents = require('./server/torrents.cjs');
 const { initAutoUpdate } = require('./updater.cjs');
 
 const isDev = !app.isPackaged;
@@ -252,6 +253,52 @@ ipcMain.handle('config:set', (_e, patch) => {
     subtitleDownloader.setApiKey(patch.openSubtitlesApiKey);
   }
   return cfg;
+});
+
+// ── Torrent search + drag/drop hand-off ──
+const VIDEO_EXTS = new Set(['.mp4', '.mkv', '.avi', '.webm', '.mov', '.m4v']);
+
+ipcMain.handle('torrents:search', (_e, query) => torrents.search(query));
+
+ipcMain.handle('torrents:open-magnet', async (_e, magnet) => {
+  if (typeof magnet !== 'string' || !magnet.startsWith('magnet:')) return { error: 'Lien magnet invalide' };
+  await shell.openExternal(magnet); // hands off to the user's default torrent client
+  return { ok: true };
+});
+
+ipcMain.handle('torrents:open-file', async (_e, filePath) => {
+  const err = await shell.openPath(filePath); // .torrent → default client
+  return err ? { error: err } : { ok: true };
+});
+
+// Drop video files onto the app → copy them into the shared scan folder and
+// rescan so they show up in the library. Copy (not move) to keep the source.
+ipcMain.handle('torrents:add-videos', async (_e, paths) => {
+  const cfg = loadConfig();
+  if (!cfg.scanFolder) return { error: 'Aucun dossier de bibliothèque configuré. Choisis-en un d’abord.' };
+  const list = Array.isArray(paths) ? paths : [];
+  let added = 0;
+  const skipped = [];
+  for (const src of list) {
+    const ext = path.extname(src).toLowerCase();
+    if (!VIDEO_EXTS.has(ext)) { skipped.push(path.basename(src)); continue; }
+    const dest = path.join(cfg.scanFolder, path.basename(src));
+    try {
+      if (path.resolve(src) !== path.resolve(dest)) await fs.promises.copyFile(src, dest);
+      added++;
+    } catch (e) {
+      console.error('[torrents] copy failed for', src, e.message);
+      skipped.push(path.basename(src));
+    }
+  }
+  if (added > 0) {
+    try {
+      await scanFolder(cfg.scanFolder);
+      broadcastCatalog();
+      processInBackground(getAllMedia());
+    } catch (e) { console.error('Rescan after add failed:', e); }
+  }
+  return { added, skipped };
 });
 
 ipcMain.handle('dialog:pick-folder', async () => {

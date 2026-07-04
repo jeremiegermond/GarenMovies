@@ -1,6 +1,6 @@
-import { Library, Tv, MessageCircle, Settings2, ChevronLeft } from 'lucide-react';
+import { Library, Tv, MessageCircle, Settings2, ChevronLeft, Magnet } from 'lucide-react';
 
-export default function Tabs({ tab, onChange, chatOpen, onToggleChat, onOpenSettings, onLeave, badges = {} }) {
+export default function Tabs({ tab, onChange, chatOpen, onToggleChat, onOpenSettings, onLeave, badges = {}, showTorrents = false }) {
   return (
     <div className="topbar">
       <div className="topbar-left">
@@ -20,6 +20,15 @@ export default function Tabs({ tab, onChange, chatOpen, onToggleChat, onOpenSett
             <Tv size={14} />
             Salon
           </button>
+          {showTorrents && (
+            <button
+              className={`tab ${tab === 'torrents' ? 'active' : ''}`}
+              onClick={() => onChange('torrents')}
+            >
+              <Magnet size={14} />
+              Torrents
+            </button>
+          )}
         </nav>
       </div>
       <div className="topbar-right">

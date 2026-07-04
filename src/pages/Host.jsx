@@ -6,6 +6,7 @@ import CatalogueView from '../components/CatalogueView.jsx';
 import Chat from '../components/Chat.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import Player from '../components/Player.jsx';
+import TorrentsView from '../components/TorrentsView.jsx';
 
 const NICK_KEY = 'garenmovies-nickname';
 
@@ -143,6 +144,7 @@ export default function Host({ onLeave }) {
         onOpenSettings={() => setSettingsOpen(true)}
         onLeave={onLeave}
         badges={{ unread }}
+        showTorrents={true}
       />
       <div className="page-body">
         <div className="page-main">
@@ -157,6 +159,8 @@ export default function Host({ onLeave }) {
               isHost={true}
               onOpenSettings={() => setSettingsOpen(true)}
             />
+          ) : tab === 'torrents' ? (
+            <TorrentsView />
           ) : (
             <div className="workspace">
               <aside className="sidebar">

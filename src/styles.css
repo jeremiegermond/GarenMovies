@@ -1580,3 +1580,85 @@ input:disabled { opacity: 0.5; }
 
 /* Selection */
 ::selection { background: rgba(245, 245, 247, 0.2); }
+
+/* ── Torrents view ── */
+.torrents-view {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 28px 32px;
+  overflow: hidden; /* only the results list scrolls; head + dropzone stay put */
+}
+.torrents-head { flex-shrink: 0; }
+.torrents-view.dragging { outline: 2px dashed var(--accent, #6c8cff); outline-offset: -12px; }
+.torrents-head h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 4px; }
+.torrents-sub { font-size: 13px; color: var(--text-tertiary); margin: 0 0 16px; max-width: 640px; }
+.torrents-search {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 8px 12px; max-width: 640px;
+}
+.torrents-search svg { color: var(--text-tertiary); flex-shrink: 0; }
+.torrents-search input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 14px; font-family: inherit;
+}
+.torrents-search button { flex-shrink: 0; padding: 7px 16px; }
+
+.torrents-results { flex: 1; min-height: 0; overflow-y: auto; }
+.torrents-empty {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--text-tertiary); font-size: 13px; padding: 40px;
+}
+.torrents-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.torrents-table thead th {
+  text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-tertiary); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-base); z-index: 1;
+}
+.torrents-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.torrents-table tr:hover td { background: var(--accent-soft); }
+.tt-name { max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-size { color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tt-seed { text-align: right; font-variant-numeric: tabular-nums; }
+.tt-seed .seed-ok { color: #4ade80; font-weight: 600; }
+.tt-seed .seed-none { color: var(--text-tertiary); }
+.tt-source { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+.src-yts { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+.src-tpb { background: rgba(108, 140, 255, 0.15); color: #8fa6ff; }
+.tt-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.tt-open {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px;
+  background: var(--accent-soft); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--r-sm); font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit;
+}
+.tt-open:hover { background: var(--bg-elevated-2); }
+.tt-copy {
+  display: inline-flex; align-items: center; padding: 5px 8px; background: transparent;
+  color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer;
+}
+.tt-copy:hover { color: var(--text); }
+
+.torrents-dropzone {
+  flex-shrink: 0; /* pinned at the bottom, never scrolls with the results */
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 22px; border: 1.5px dashed var(--border); border-radius: var(--r-md);
+  color: var(--text-tertiary); text-align: center; background: var(--bg-elevated);
+}
+.torrents-dropzone .dz-title { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.torrents-dropzone .dz-sub { font-size: 12px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: center; }
+.torrents-dropzone code { background: var(--bg-elevated-2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+
+.torrents-drop-overlay {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: rgba(10, 12, 20, 0.85); backdrop-filter: blur(6px);
+  color: var(--text); font-size: 18px; font-weight: 600; pointer-events: none;
+}
+.torrents-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 40;
+  background: var(--bg-elevated-2); color: var(--text); border: 1px solid var(--border);
+  padding: 10px 18px; border-radius: var(--r-md); font-size: 13px; box-shadow: var(--shadow-lg);
+}
