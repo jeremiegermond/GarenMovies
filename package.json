@@ -13,7 +13,7 @@
     "start": "electron .",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:win": "npm run build && node scripts/build-win.cjs"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",
