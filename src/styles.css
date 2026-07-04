@@ -646,6 +646,8 @@ input:disabled { opacity: 0.5; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Icon-only overlay button (e.g. fullscreen toggle) — square, no label. */
+.overlay-toggle-icon { padding: 8px; }
 .overlay-progress {
   display: inline-flex;
   align-items: center;
@@ -681,6 +683,10 @@ input:disabled { opacity: 0.5; }
   gap: 1px;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  /* Cap the height so a long subtitle list scrolls instead of overflowing
+     past the bottom of the window (the end used to be unreachable). */
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
 }
 .overlay-menu-title {
   font-size: 10px;

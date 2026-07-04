@@ -40,17 +40,41 @@ function cacheKey(parsed) {
   return `m:${base}${parsed.year ? ':' + parsed.year : ''}`;
 }
 
+// The first of these tokens marks the start of release noise (encoding /
+// quality / group), i.e. everything after it is NOT part of the real title.
+// Used to trim the TMDB query when a scene name has no usable year.
+const SCENE_TAG_RE = /\b(\d{3,4}p|4k|2160p|1080p|720p|480p|x264|x265|h ?264|h ?265|hevc|av1|xvid|divx|10bit|12bit|8bit|hdr10?\+?|hdr|dv|bluray|blu ray|brrip|bdrip|dvdrip|dvd|web ?dl|web ?rip|webmux|dlmux|bdmux|hdtv|amzn|nf|hmax|dsnp|atvp|atmos|dts|aac\d?|ac ?3|eac ?3|truehd|ddp?\d?|opus|flac|mp3|remux|repack|proper|extended|uncut|remastered|imax|hybrid|complete|multi|dual|vostfr|subs?|ita|eng|fra|fre|vff?|vfq|truefrench)\b/i;
+
+function cleanupName(s) {
+  // Drop leading/trailing separators and stray opening brackets left behind
+  // when we slice a title right before a "(2014)" style year.
+  return s.replace(/[\s\-_.([{]+$/, '').replace(/^[\s\-_.)\]}]+/, '').replace(/\s+/g, ' ').trim();
+}
+
 function parseTitle(rawTitle) {
-  // TV episode: "Show Name S01E01" or "Show Name s1e1"
-  let m = rawTitle.match(/^(.+?)\s+s(\d{1,2})e(\d{1,2})\b/i);
-  if (m) return { name: m[1].trim(), season: +m[2], episode: +m[3], isTV: true };
-  // TV alt: "Show Name 1x01"
-  m = rawTitle.match(/^(.+?)\s+(\d{1,2})x(\d{1,2})\b/i);
-  if (m) return { name: m[1].trim(), season: +m[2], episode: +m[3], isTV: true };
-  // Movie with year
-  m = rawTitle.match(/^(.+?)\s*\((\d{4})\)\s*$/);
-  if (m) return { name: m[1].trim(), year: m[2], isTV: false };
-  return { name: rawTitle.trim(), isTV: false };
+  // Normalise separators so dotted scene names ("Show.Name.S01E01...") parse
+  // the same as spaced ones.
+  const t = rawTitle.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // TV episode: "Show Name S01E01" / "s1e1" / "1x01"
+  let m = t.match(/^(.+?)\s+s(\d{1,2})\s*e(\d{1,2})\b/i)
+       || t.match(/^(.+?)\s+(\d{1,2})x(\d{1,2})\b/i);
+  if (m) return { name: cleanupName(m[1]), season: +m[2], episode: +m[3], isTV: true };
+
+  // Movie: cut at the first release-year token (1900–2099) wherever it sits —
+  // everything after it (codec/res/group) is junk. This turns
+  // "The Dark Knight 2008 bluray av1 subs-Dust" into "The Dark Knight" + 2008.
+  const ym = t.match(/\b(19\d{2}|20\d{2})\b/);
+  if (ym && ym.index > 0) {
+    return { name: cleanupName(t.slice(0, ym.index)), year: ym[1], isTV: false };
+  }
+
+  // No year: cut at the first scene tag if there is one before real text ends.
+  const tag = t.match(SCENE_TAG_RE);
+  if (tag && tag.index > 0) {
+    return { name: cleanupName(t.slice(0, tag.index)), isTV: false };
+  }
+  return { name: cleanupName(t), isTV: false };
 }
 
 async function searchTMDB(endpoint, query, extras = {}) {

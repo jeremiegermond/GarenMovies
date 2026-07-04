@@ -31,6 +31,7 @@ export default function Client({ onLeave }) {
   const [error, setError] = useState(null);
   const [catalog, setCatalog] = useState({ catalogue: [], stream: [] });
   const [syncState, setSyncState] = useState(null);
+  const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
   const [viewers, setViewers] = useState(0);
   const [nickname, setNickname] = useState(() => localStorage.getItem(NICK_KEY) || 'Anonyme');
   const socketRef = useRef(null);
@@ -80,6 +81,7 @@ export default function Client({ onLeave }) {
     socket.on('disconnect', () => setConnected(false));
     socket.on('state', (s) => setSyncState(s));
     socket.on('catalog', (cat) => setCatalog(cat));
+    socket.on('sub:activate', ({ mediaId, idx }) => setSubActivation({ mediaId, idx, ts: Date.now() }));
     socket.on('viewers', ({ count }) => setViewers(Math.max(0, count - 1)));
     socket.on('host-left', () => setSyncState((s) => s && { ...s, paused: true }));
   }
@@ -190,6 +192,7 @@ export default function Client({ onLeave }) {
                   subs={activeMedia?.subs || []}
                   audioTracks={activeMedia?.audioTracks || []}
                   videoCodec={activeMedia?.videoCodec || null}
+                  subActivation={subActivation}
                   streamBase={streamBase}
                   mediaId={activeId}
                   mediaTitle={activeMedia?.title}

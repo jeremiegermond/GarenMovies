@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 
 const SYNC_THRESHOLD = 1.0;
@@ -11,12 +11,15 @@ const SYNC_THRESHOLD = 1.0;
 const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
 function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
   const videoRef = useRef(null);
+  const wrapRef = useRef(null);
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
   const wasPlayingRef = useRef(false);
   const pollTokenRef = useRef(0); // bumped on every reset/prep change to cancel stale polls
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [activeSubIdx, setActiveSubIdx] = useState(-1);
@@ -100,6 +103,14 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
 
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
+
+  // A subtitle was downloaded somewhere in the room → auto-activate it here too
+  // (host download propagates to every guest via the `sub:activate` socket).
+  useEffect(() => {
+    if (!subActivation || subActivation.idx == null) return;
+    if (subActivation.mediaId !== mediaId) return;
+    setActiveSubIdx(subActivation.idx);
+  }, [subActivation, mediaId]);
 
   // Decide the starting mode for the default audio track once probe data is in.
   //   HEVC video        → 'hls'    (Chromium can't decode it; go progressive)
@@ -259,6 +270,24 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setMode('transcode'); setPrep(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, prep?.status, hlsUrl]);
+
+  // Fullscreen the whole player wrapper (not just the <video>) so our overlay
+  // controls + subtitle menus stay usable in fullscreen. Available to everyone,
+  // including guests — who otherwise have no native controls (controls={isHost}).
+  function toggleFullscreen() {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      (el.requestFullscreen?.() || Promise.reject()).catch(() => {});
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   function onLoadedMetadata() {
     const v = videoRef.current;
@@ -482,7 +511,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const showVideoError = !!videoError && !showPrepOverlay && !showPrepError;
 
   return (
-    <div className="player-wrap">
+    <div className="player-wrap" ref={wrapRef}>
       {(effectiveSrc || hlsActive) ? (
         <video
           ref={videoRef}
@@ -720,6 +749,18 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
               </div>
             </>
           )}
+        </div>
+
+        <div className="overlay-control">
+          <button
+            className="overlay-toggle overlay-toggle-icon"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+          >
+            {isFullscreen
+              ? <Minimize size={16} strokeWidth={2} />
+              : <Maximize size={16} strokeWidth={2} />}
+          </button>
         </div>
       </div>
 

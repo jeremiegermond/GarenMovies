@@ -395,6 +395,9 @@ function startServer(port, opts = {}) {
           label: label || `${(lang || 'und').toUpperCase()} (téléchargé)`
         });
         broadcastCatalog();
+        // Tell everyone in the room to auto-activate the freshly downloaded
+        // sub, so guests get it too (not just available in their menu).
+        if (io) io.emit('sub:activate', { mediaId, idx: sub.idx });
         res.json({
           sub: { idx: sub.idx, lang: sub.lang, label: sub.label, embedded: false, type: sub.type },
           remaining: result.remaining,

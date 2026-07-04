@@ -11,6 +11,7 @@ const subtitleDownloader = require('./server/subtitle-downloader.cjs');
 const ffmpeg = require('./server/ffmpeg.cjs');
 const vlc = require('./server/vlc.cjs');
 const hls = require('./server/hls.cjs');
+const { initAutoUpdate } = require('./updater.cjs');
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = 4123;
@@ -200,6 +201,9 @@ app.whenReady().then(async () => {
   if (cfg.openSubtitlesApiKey) subtitleDownloader.setApiKey(cfg.openSubtitlesApiKey);
 
   await createWindow();
+
+  // Check GitHub Releases for a newer version and offer to install it.
+  initAutoUpdate(() => mainWindow);
 
   if (cfg.scanFolder) {
     try {

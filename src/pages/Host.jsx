@@ -20,6 +20,7 @@ export default function Host({ onLeave }) {
   const [folder, setFolder] = useState(null);
   const [catalog, setCatalog] = useState({ catalogue: [], stream: [] });
   const [activeId, setActiveId] = useState(null);
+  const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
   const [viewers, setViewers] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [tunnelURL, setTunnelURL] = useState(null);
@@ -51,6 +52,7 @@ export default function Host({ onLeave }) {
     socket.on('connect', () => socket.emit('hello', { role: 'host', nickname: nicknameRef.current }));
     socket.on('viewers', ({ count }) => setViewers(Math.max(0, count - 1)));
     socket.on('catalog', (cat) => setCatalog(cat));
+    socket.on('sub:activate', ({ mediaId, idx }) => setSubActivation({ mediaId, idx, ts: Date.now() }));
     return () => { socket.disconnect(); socketRef.current = null; };
   }, [serverInfo]);
 
@@ -221,6 +223,7 @@ export default function Host({ onLeave }) {
                   subs={activeMedia?.subs || []}
                   audioTracks={activeMedia?.audioTracks || []}
                   videoCodec={activeMedia?.videoCodec || null}
+                  subActivation={subActivation}
                   streamBase={streamBase}
                   mediaId={activeId}
                   mediaTitle={activeMedia?.title}
