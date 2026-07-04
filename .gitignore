@@ -21,3 +21,6 @@ plan/
 
 # Local scratchpad
 requete.txt
+
+# Release notes (kept out of the repo, pasted into GitHub releases)
+RELEASE_NOTES_*.md
