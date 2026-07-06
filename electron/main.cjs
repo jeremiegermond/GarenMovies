@@ -108,7 +108,7 @@ function scheduleBroadcast() {
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null;
     broadcastCatalog();
-  }, 1500);
+  }, 600); // coalesce bursts but still surface new posters/categories quickly
 }
 
 let processing = false;

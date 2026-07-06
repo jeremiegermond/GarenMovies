@@ -15,7 +15,7 @@ function MovieCard({ movie, active, onClick, canSelect }) {
     >
       <div className="card-poster">
         {poster ? (
-          <img src={poster} alt={movie.title} loading="lazy" />
+          <img src={poster} alt={movie.title} loading="lazy" decoding="async" />
         ) : (
           <div className="card-placeholder">
             <Film size={36} strokeWidth={1.25} />
@@ -53,7 +53,7 @@ function SeriesCard({ group, activeId, onSelectEpisode, canSelect }) {
       >
         <div className="card-poster">
           {group.poster ? (
-            <img src={group.poster} alt={group.showName} loading="lazy" />
+            <img src={group.poster} alt={group.showName} loading="lazy" decoding="async" />
           ) : (
             <div className="card-placeholder">
               <Film size={36} strokeWidth={1.25} />

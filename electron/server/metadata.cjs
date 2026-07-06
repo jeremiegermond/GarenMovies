@@ -207,19 +207,31 @@ let enrichingPromise = null;
 async function enrichBatch(items, onProgress) {
   if (enrichingPromise) return enrichingPromise;
   enrichingPromise = (async () => {
+    // Only look up items that don't already have a poster or a known "not found"
+    // result (those are cheap cache hits anyway, but skip them entirely).
+    const todo = items.filter((it) => !(it.meta && (it.meta.poster || it.meta.notFound)));
     let changed = 0;
-    for (const item of items) {
-      if (item.meta && item.meta.poster) continue;
-      const meta = await lookupTitle(item.title);
-      if (meta && !meta.notFound) {
-        item.meta = meta;
-        changed++;
-        if (onProgress) onProgress(item, changed);
-      } else if (meta && meta.notFound) {
-        item.meta = { notFound: true };
+    let next = 0;
+    // Run a few lookups in parallel instead of one-at-a-time with a 200 ms gap
+    // between each. TMDB tolerates ~50 req/10 s, so 4 concurrent is safe and the
+    // whole library gets posters + categories in seconds instead of tens of them.
+    const CONCURRENCY = 4;
+    async function worker() {
+      while (next < todo.length) {
+        const item = todo[next++];
+        try {
+          const meta = await lookupTitle(item.title);
+          if (meta && !meta.notFound) {
+            item.meta = meta;
+            changed++;
+            if (onProgress) onProgress(item, changed);
+          } else if (meta && meta.notFound) {
+            item.meta = { notFound: true };
+          }
+        } catch { /* skip this one, keep going */ }
       }
-      await new Promise((r) => setTimeout(r, 200));
     }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     return changed;
   })();
   try {
