@@ -17,6 +17,26 @@ export default function UpdateModal() {
     });
   }, []);
 
+  // Dev-only: Ctrl+Shift+U replays the whole update flow so the UI can be
+  // previewed without publishing two releases. Stripped from production builds.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onKey = (e) => {
+      if (!(e.ctrlKey && e.shiftKey && (e.key === 'u' || e.key === 'U'))) return;
+      const total = 222_686_760;
+      setDismissed(false);
+      setStatus({ phase: 'available', version: '9.9.9' });
+      let pct = 0;
+      const t = setInterval(() => {
+        pct += 6;
+        if (pct >= 100) { clearInterval(t); setStatus({ phase: 'downloaded', version: '9.9.9' }); }
+        else setStatus({ phase: 'downloading', percent: pct, transferred: (pct / 100) * total, total, bytesPerSecond: 8_500_000 });
+      }, 350);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   if (!status || dismissed) return null;
   const { phase } = status;
   // Stay silent on checking / up-to-date / transient errors — nothing to show.
@@ -60,7 +80,7 @@ export default function UpdateModal() {
           {phase === 'available' && (
             <>
               <button className="ghost" onClick={() => setDismissed(true)}>Plus tard</button>
-              <button className="primary" onClick={() => window.electronAPI.update.download()}>
+              <button className="primary" onClick={() => window.electronAPI?.update?.download?.().catch(() => {})}>
                 <Download size={14} strokeWidth={2} /> Télécharger
               </button>
             </>
@@ -71,7 +91,7 @@ export default function UpdateModal() {
           {phase === 'downloaded' && (
             <>
               <button className="ghost" onClick={() => setDismissed(true)}>Plus tard</button>
-              <button className="primary" onClick={() => window.electronAPI.update.install()}>
+              <button className="primary" onClick={() => window.electronAPI?.update?.install?.().catch(() => {})}>
                 <RefreshCw size={14} strokeWidth={2} /> Redémarrer et installer
               </button>
             </>
