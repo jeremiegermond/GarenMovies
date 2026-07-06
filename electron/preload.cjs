@@ -27,5 +27,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openMagnet: (magnet) => ipcRenderer.invoke('torrents:open-magnet', magnet),
     openFile: (filePath) => ipcRenderer.invoke('torrents:open-file', filePath),
     addVideos: (paths) => ipcRenderer.invoke('torrents:add-videos', paths)
+  },
+  update: {
+    onStatus: (cb) => {
+      const handler = (_e, status) => cb(status);
+      ipcRenderer.on('update:status', handler);
+      return () => ipcRenderer.removeListener('update:status', handler);
+    },
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    check: () => ipcRenderer.invoke('update:check')
   }
 });
