@@ -337,6 +337,9 @@ input:disabled { opacity: 0.5; }
   align-items: flex-start;
   gap: 12px;
   min-width: 0;
+  /* .home-action is a <button>; the global button rule sets white-space:nowrap,
+     which inherits into the description and stops it wrapping. Reset it. */
+  white-space: normal;
   padding: 24px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-faint);
