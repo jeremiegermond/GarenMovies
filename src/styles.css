@@ -1722,3 +1722,11 @@ input:disabled { opacity: 0.5; }
 }
 .update-actions { display: flex; gap: 10px; margin-top: 6px; width: 100%; }
 .update-actions button { flex: 1; }
+
+/* Library rescan toolbar */
+.catalogue-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -24px; /* trim the 40px column gap so the button sits close to the first section */
+}
+.catalogue-toolbar button { padding: 7px 14px; }

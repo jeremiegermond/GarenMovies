@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Film, Play, X, Layers } from 'lucide-react';
+import { Film, Play, X, Layers, RefreshCw } from 'lucide-react';
 
 function MovieCard({ movie, active, onClick, canSelect }) {
   const poster = movie.meta?.poster;
@@ -226,10 +226,18 @@ function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyM
   );
 }
 
-export default function CatalogueView({ catalog, activeId, onSelect, canSelect, connected, hasApiKey, onOpenSettings, isHost }) {
+export default function CatalogueView({ catalog, activeId, onSelect, canSelect, connected, hasApiKey, onOpenSettings, isHost, onRescan, scanning }) {
   const total = (catalog.catalogue?.length || 0) + (catalog.stream?.length || 0);
   return (
     <div className="catalogue-view">
+      {isHost && onRescan && (
+        <div className="catalogue-toolbar">
+          <button onClick={onRescan} disabled={scanning} title="Rescanner le dossier de films">
+            <RefreshCw size={14} strokeWidth={1.75} className={scanning ? 'spin' : ''} />
+            {scanning ? 'Actualisation…' : 'Actualiser'}
+          </button>
+        </div>
+      )}
       {!hasApiKey && total > 0 && isHost && (
         <div className="catalogue-banner">
           Pas d'affiches ?

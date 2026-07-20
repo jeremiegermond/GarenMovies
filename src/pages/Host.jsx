@@ -157,6 +157,8 @@ export default function Host({ onLeave }) {
               connected={true}
               hasApiKey={hasApiKey}
               isHost={true}
+              onRescan={rescan}
+              scanning={scanning}
               onOpenSettings={() => setSettingsOpen(true)}
             />
           ) : tab === 'torrents' ? (
