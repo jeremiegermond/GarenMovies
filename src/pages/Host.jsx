@@ -158,6 +158,7 @@ export default function Host({ onLeave }) {
               hasApiKey={hasApiKey}
               isHost={true}
               onRescan={rescan}
+              onPickFolder={pickFolder}
               scanning={scanning}
               onOpenSettings={() => setSettingsOpen(true)}
             />

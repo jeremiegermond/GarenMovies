@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, Square, FolderOpen, Film, Share2, Monitor } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Square, FolderOpen, Film, Monitor } from 'lucide-react';
+import CatalogueView from '../components/CatalogueView.jsx';
 
 function fmt(t) {
   if (t == null || isNaN(t)) return '0:00';
@@ -9,37 +10,50 @@ function fmt(t) {
 }
 
 export default function Solo({ onLeave }) {
-  const [fileName, setFileName] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [catalog, setCatalog] = useState({ catalogue: [], stream: [] });
+  const [folder, setFolder] = useState(null);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [playing, setPlaying] = useState(null); // { id, name }
   const [error, setError] = useState(null);
   const [st, setSt] = useState({ position: 0, duration: 0, paused: false });
-  const [scrub, setScrub] = useState(null); // while dragging the seek bar
-  const scrubbing = useRef(false);
+  const [scrub, setScrub] = useState(null);
 
   useEffect(() => {
-    if (!window.electronAPI?.solo) return;
+    window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); }).catch(() => {});
+    window.electronAPI.getCatalog().then(setCatalog).catch(() => {});
     const off = window.electronAPI.solo.onStatus((s) => {
-      if (s.stopped) { setFileName(null); setSt({ position: 0, duration: 0, paused: false }); return; }
+      if (s.stopped) { setPlaying(null); setSt({ position: 0, duration: 0, paused: false }); return; }
       if (s.error) { setError(s.error); return; }
       setSt((prev) => ({ ...prev, ...s }));
     });
-    // Stop mpv when leaving solo mode.
     return () => { off && off(); window.electronAPI.solo.stop(); };
   }, []);
 
-  async function pickAndOpen() {
+  async function reload() { try { setCatalog(await window.electronAPI.getCatalog()); } catch {} }
+  async function pickFolder() {
+    const f = await window.electronAPI.pickFolder();
+    if (!f) return;
+    setFolder(f); setScanning(true);
+    try { await window.electronAPI.scanFolder(f); await reload(); } finally { setScanning(false); }
+  }
+  async function rescan() {
+    if (!folder) return;
+    setScanning(true);
+    try { await window.electronAPI.rescan(); await reload(); } finally { setScanning(false); }
+  }
+  async function playFilm(film) {
+    const path = film?.source?.path;
+    if (!path) return;
     setError(null);
-    const filePath = await window.electronAPI.solo.pick();
-    if (!filePath) return;
-    setLoading(true);
-    const res = await window.electronAPI.solo.open(filePath);
-    setLoading(false);
+    const res = await window.electronAPI.solo.open(path);
     if (res?.error) { setError(res.error); return; }
-    setFileName(filePath.split(/[\\/]/).pop());
+    setPlaying({ id: film.id, name: film.title });
   }
 
   const pos = scrub != null ? scrub : (st.position || 0);
   const dur = st.duration || 0;
+  const hasFilms = (catalog.stream?.length || 0) > 0;
 
   return (
     <div className="app solo-app">
@@ -51,56 +65,59 @@ export default function Solo({ onLeave }) {
         <div style={{ width: 36 }} />
       </div>
 
-      <div className="solo-body">
-        {!fileName ? (
+      <div className="solo-main">
+        {hasFilms || folder ? (
+          <CatalogueView
+            catalog={catalog}
+            activeId={playing?.id || null}
+            onSelect={playFilm}
+            canSelect={true}
+            connected={true}
+            hasApiKey={hasApiKey}
+            isHost={true}
+            onRescan={rescan}
+            onPickFolder={pickFolder}
+            scanning={scanning}
+            hideServerSection={true}
+            streamTitle="Bibliothèque"
+            onOpenSettings={() => {}}
+          />
+        ) : (
           <div className="solo-empty">
             <div className="solo-empty-icon"><Film size={40} strokeWidth={1.25} /></div>
             <h2>Regarder un film en solo</h2>
-            <p>Lecture native instantanée (tous les formats, HEVC inclus), sans transcodage ni salon.</p>
-            <button className="primary" onClick={pickAndOpen} disabled={loading}>
+            <p>Lecture native instantanée (tous les formats, HEVC inclus), sans transcodage ni salon. Choisis le dossier où sont tes films.</p>
+            <button className="primary" onClick={pickFolder} disabled={scanning}>
               <FolderOpen size={15} strokeWidth={2} />
-              {loading ? 'Ouverture…' : 'Choisir un film'}
+              {scanning ? 'Analyse…' : 'Choisir le dossier de films'}
             </button>
             {error && <div className="error">{error}</div>}
           </div>
-        ) : (
-          <div className="solo-player">
-            <div className="solo-window-hint">
-              <Monitor size={14} strokeWidth={1.75} />
-              La vidéo joue dans une fenêtre dédiée (mpv). Utilise les contrôles ci-dessous.
-            </div>
-            <div className="solo-nowplaying">
-              <Film size={16} strokeWidth={1.75} />
-              <span className="solo-file" title={fileName}>{fileName}</span>
-            </div>
-
-            <div className="solo-controls">
-              <button className="solo-play" onClick={() => window.electronAPI.solo.toggle()}>
-                {st.paused ? <Play size={18} strokeWidth={2} fill="currentColor" /> : <Pause size={18} strokeWidth={2} fill="currentColor" />}
-              </button>
-              <span className="solo-time">{fmt(pos)}</span>
-              <input
-                className="solo-seek"
-                type="range" min={0} max={Math.max(dur, 0.1)} step={0.1} value={Math.min(pos, dur || pos)}
-                onMouseDown={() => { scrubbing.current = true; }}
-                onChange={(e) => setScrub(Number(e.target.value))}
-                onMouseUp={(e) => { scrubbing.current = false; window.electronAPI.solo.seek(Number(e.target.value)); setScrub(null); }}
-              />
-              <span className="solo-time">{fmt(dur)}</span>
-              <button className="solo-stop" onClick={() => { window.electronAPI.solo.stop(); }} title="Arrêter">
-                <Square size={15} strokeWidth={2} fill="currentColor" />
-              </button>
-            </div>
-
-            <div className="solo-actions">
-              <button onClick={pickAndOpen}><FolderOpen size={14} strokeWidth={2} /> Changer de film</button>
-              <button className="solo-share" disabled title="Bientôt : inviter des amis en plein film">
-                <Share2 size={14} strokeWidth={2} /> Passer en mode partagé (bientôt)
-              </button>
-            </div>
-          </div>
         )}
       </div>
+
+      {playing && (
+        <div className="solo-playbar">
+          <div className="solo-nowplaying">
+            <Monitor size={14} strokeWidth={1.75} />
+            <span className="solo-file" title={playing.name}>{playing.name}</span>
+          </div>
+          <button className="solo-play" onClick={() => window.electronAPI.solo.toggle()}>
+            {st.paused ? <Play size={18} strokeWidth={2} fill="currentColor" /> : <Pause size={18} strokeWidth={2} fill="currentColor" />}
+          </button>
+          <span className="solo-time">{fmt(pos)}</span>
+          <input
+            className="solo-seek"
+            type="range" min={0} max={Math.max(dur, 0.1)} step={0.1} value={Math.min(pos, dur || pos)}
+            onChange={(e) => setScrub(Number(e.target.value))}
+            onMouseUp={(e) => { window.electronAPI.solo.seek(Number(e.target.value)); setScrub(null); }}
+          />
+          <span className="solo-time">{fmt(dur)}</span>
+          <button className="solo-stop" onClick={() => window.electronAPI.solo.stop()} title="Arrêter">
+            <Square size={14} strokeWidth={2} fill="currentColor" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

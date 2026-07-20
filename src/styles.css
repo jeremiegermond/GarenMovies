@@ -1756,9 +1756,9 @@ input:disabled { opacity: 0.5; }
   padding: 0 16px; border-bottom: 1px solid var(--border-faint);
   background: rgba(10, 10, 13, 0.8);
 }
-.solo-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 32px; }
+.solo-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-.solo-empty { text-align: center; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.solo-empty { margin: auto; text-align: center; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px; }
 .solo-empty-icon {
   width: 76px; height: 76px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -1768,31 +1768,27 @@ input:disabled { opacity: 0.5; }
 .solo-empty p { font-size: 14px; color: var(--text-tertiary); margin: 0 0 8px; line-height: 1.5; }
 .solo-empty .primary { padding: 10px 20px; }
 
-.solo-player { width: min(680px, 100%); display: flex; flex-direction: column; gap: 18px; }
-.solo-window-hint {
-  display: flex; align-items: center; gap: 8px; justify-content: center;
-  font-size: 12px; color: var(--text-tertiary);
-  background: var(--bg-elevated); border: 1px solid var(--border-faint);
-  border-radius: var(--r-md); padding: 10px 14px;
+/* Fixed control bar at the bottom while a film plays (video is in mpv's window) */
+.solo-playbar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
 }
 .solo-nowplaying {
-  display: flex; align-items: center; gap: 10px; color: var(--text);
-  font-size: 15px; font-weight: 550; justify-content: center;
+  display: flex; align-items: center; gap: 8px; color: var(--text);
+  font-size: 13px; font-weight: 550;
+  min-width: 140px; max-width: 300px;
 }
-.solo-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px; }
-
-.solo-controls {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: var(--r-lg); padding: 14px 18px;
-}
+.solo-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .solo-play {
-  width: 44px; height: 44px; padding: 0; flex-shrink: 0;
+  width: 40px; height: 40px; padding: 0; flex-shrink: 0;
   border-radius: 50%; background: var(--text); color: var(--bg-base); border: none;
 }
 .solo-play:hover { background: #fff; }
 .solo-stop {
-  width: 36px; height: 36px; padding: 0; flex-shrink: 0; border-radius: var(--r-md);
+  width: 34px; height: 34px; padding: 0; flex-shrink: 0; border-radius: var(--r-md);
   color: var(--text-secondary);
 }
 .solo-time { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
@@ -1800,6 +1796,3 @@ input:disabled { opacity: 0.5; }
   flex: 1; width: auto; padding: 0; background: transparent; border: none;
   accent-color: var(--text); cursor: pointer;
 }
-.solo-actions { display: flex; gap: 10px; justify-content: center; }
-.solo-actions button { padding: 8px 14px; font-size: 13px; }
-.solo-share { color: var(--text-tertiary); }

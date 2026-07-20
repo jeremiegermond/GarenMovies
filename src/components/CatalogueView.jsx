@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Film, Play, X, Layers, RefreshCw } from 'lucide-react';
+import { Film, Play, X, Layers, RefreshCw, Folder } from 'lucide-react';
 
 function MovieCard({ movie, active, onClick, canSelect }) {
   const poster = movie.meta?.poster;
@@ -226,16 +226,24 @@ function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyM
   );
 }
 
-export default function CatalogueView({ catalog, activeId, onSelect, canSelect, connected, hasApiKey, onOpenSettings, isHost, onRescan, scanning }) {
+export default function CatalogueView({ catalog, activeId, onSelect, canSelect, connected, hasApiKey, onOpenSettings, isHost, onRescan, onPickFolder, scanning, hideServerSection, streamTitle = 'Stream' }) {
   const total = (catalog.catalogue?.length || 0) + (catalog.stream?.length || 0);
   return (
     <div className="catalogue-view">
-      {isHost && onRescan && (
+      {isHost && (onRescan || onPickFolder) && (
         <div className="catalogue-toolbar">
-          <button onClick={onRescan} disabled={scanning} title="Rescanner le dossier de films">
-            <RefreshCw size={14} strokeWidth={1.75} className={scanning ? 'spin' : ''} />
-            {scanning ? 'Actualisation…' : 'Actualiser'}
-          </button>
+          {onPickFolder && (
+            <button onClick={onPickFolder} disabled={scanning} title="Choisir le dossier où sont les films">
+              <Folder size={14} strokeWidth={1.75} />
+              Changer le dossier
+            </button>
+          )}
+          {onRescan && (
+            <button onClick={onRescan} disabled={scanning} title="Rescanner le dossier de films">
+              <RefreshCw size={14} strokeWidth={1.75} className={scanning ? 'spin' : ''} />
+              {scanning ? 'Actualisation…' : 'Actualiser'}
+            </button>
+          )}
         </div>
       )}
       {!hasApiKey && total > 0 && isHost && (
@@ -245,17 +253,19 @@ export default function CatalogueView({ catalog, activeId, onSelect, canSelect, 
           pour récupérer les images depuis themoviedb.org.
         </div>
       )}
+      {!hideServerSection && (
+        <Section
+          title="Catalogue"
+          subtitle="Films hébergés sur le serveur — bientôt disponible"
+          items={catalog.catalogue || []}
+          activeId={activeId}
+          onSelect={onSelect}
+          canSelect={canSelect}
+          emptyMessage="Aucun film sur le serveur pour le moment"
+        />
+      )}
       <Section
-        title="Catalogue"
-        subtitle="Films hébergés sur le serveur — bientôt disponible"
-        items={catalog.catalogue || []}
-        activeId={activeId}
-        onSelect={onSelect}
-        canSelect={canSelect}
-        emptyMessage="Aucun film sur le serveur pour le moment"
-      />
-      <Section
-        title="Stream"
+        title={streamTitle}
         subtitle={isHost ? "Films de votre bibliothèque locale" : "Films partagés par l'hôte"}
         items={catalog.stream || []}
         activeId={activeId}
