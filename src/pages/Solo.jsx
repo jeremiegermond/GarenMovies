@@ -3,6 +3,8 @@ import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, F
 import CatalogueView from '../components/CatalogueView.jsx';
 import SubtitleSearchModal from '../components/SubtitleSearchModal.jsx';
 
+const BAR_H = 64; // control-bar height reserved at the bottom when controls show in fullscreen
+
 function fmt(t) {
   if (t == null || isNaN(t)) return '0:00';
   const s = Math.max(0, Math.floor(t));
@@ -29,7 +31,9 @@ export default function Solo({ onLeave }) {
   const seekTarget = useRef(null);
   const uiTimer = useRef(null);
   const fsRef = useRef(false);
+  const uiVisibleRef = useRef(true);
   const pokeRef = useRef(() => {});
+  uiVisibleRef.current = uiVisible;
 
   // Show the controls + cursor, and (in fullscreen) auto-hide them after 2s idle.
   function poke() {
@@ -78,7 +82,11 @@ export default function Solo({ onLeave }) {
     const el = stageRef.current;
     const send = () => {
       const r = el.getBoundingClientRect();
-      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
+      // In fullscreen the stage is 100% (bar is out of flow → mpv fills the
+      // screen). When the controls are visible, shrink mpv by the bar height so
+      // the bar shows at the bottom (HTML can't overlay the native surface).
+      const h = (fsRef.current && uiVisibleRef.current) ? Math.max(1, r.height - BAR_H) : r.height;
+      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: h });
     };
     send();
     const ro = new ResizeObserver(send);
@@ -87,6 +95,14 @@ export default function Solo({ onLeave }) {
     const iv = setInterval(send, 500);
     return () => { ro.disconnect(); window.removeEventListener('resize', send); clearInterval(iv); };
   }, [playing]);
+
+  // Re-fit mpv immediately when fullscreen or control visibility changes.
+  useEffect(() => {
+    if (!playing || !stageRef.current) return;
+    const r = stageRef.current.getBoundingClientRect();
+    const h = (fullscreen && uiVisible) ? Math.max(1, r.height - BAR_H) : r.height;
+    window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: h });
+  }, [fullscreen, uiVisible, playing]);
 
   // Esc exits fullscreen.
   useEffect(() => {
