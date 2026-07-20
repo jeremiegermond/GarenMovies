@@ -82,11 +82,7 @@ export default function Solo({ onLeave }) {
     const el = stageRef.current;
     const send = () => {
       const r = el.getBoundingClientRect();
-      // In fullscreen the stage is 100% (bar is out of flow → mpv fills the
-      // screen). When the controls are visible, shrink mpv by the bar height so
-      // the bar shows at the bottom (HTML can't overlay the native surface).
-      const h = (fsRef.current && uiVisibleRef.current) ? Math.max(1, r.height - BAR_H) : r.height;
-      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: h });
+      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
     };
     send();
     const ro = new ResizeObserver(send);
@@ -96,13 +92,18 @@ export default function Solo({ onLeave }) {
     return () => { ro.disconnect(); window.removeEventListener('resize', send); clearInterval(iv); };
   }, [playing]);
 
-  // Re-fit mpv immediately when fullscreen or control visibility changes.
+  // In fullscreen the app's HTML bar can't float over the native video, so we
+  // hand control to mpv's own floating OSC (shows on hover, hides itself, hides
+  // the cursor). Windowed → OSC off, the app's bar is the UI. Also re-fit mpv
+  // to the (now 100%) stage immediately on the transition.
   useEffect(() => {
-    if (!playing || !stageRef.current) return;
-    const r = stageRef.current.getBoundingClientRect();
-    const h = (fullscreen && uiVisible) ? Math.max(1, r.height - BAR_H) : r.height;
-    window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: h });
-  }, [fullscreen, uiVisible, playing]);
+    if (!playing) return;
+    window.electronAPI.solo.osc(fullscreen ? 'auto' : 'never');
+    if (stageRef.current) {
+      const r = stageRef.current.getBoundingClientRect();
+      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
+    }
+  }, [fullscreen, playing]);
 
   // Esc exits fullscreen.
   useEffect(() => {
@@ -154,6 +155,7 @@ export default function Solo({ onLeave }) {
       {playing ? (
         <div className="solo-player-view">
           <div className="solo-stage" ref={stageRef} />
+          {!fullscreen && (
           <div className="solo-playbar">
             {!fullscreen && (
               <div className="solo-nowplaying">
@@ -187,12 +189,11 @@ export default function Solo({ onLeave }) {
             <button className="solo-mini" onClick={toggleFullscreen} title={fullscreen ? 'Quitter le plein écran' : 'Plein écran'}>
               {fullscreen ? <Minimize size={15} strokeWidth={2} /> : <Maximize size={15} strokeWidth={2} />}
             </button>
-            {!fullscreen && (
-              <button className="solo-mini" onClick={backToLibrary} title="Bibliothèque">
-                <Library size={15} strokeWidth={2} />
-              </button>
-            )}
+            <button className="solo-mini" onClick={backToLibrary} title="Bibliothèque">
+              <Library size={15} strokeWidth={2} />
+            </button>
           </div>
+          )}
 
           {showSubSearch && (
             <SubtitleSearchModal

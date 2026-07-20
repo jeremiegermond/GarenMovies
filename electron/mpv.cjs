@@ -41,7 +41,8 @@ class MpvPlayer extends EventEmitter {
       '--no-terminal',
       '--keep-open=yes',       // don't close the window at end of file
       '--sub-auto=fuzzy',      // auto-load sidecar .srt next to the video
-      '--osc=no',              // no mpv OSC — the app's control bar is the UI
+      '--osc=yes',             // native floating control bar (used in fullscreen)
+      '--cursor-autohide=1000', // hide the cursor over the video after 1s
       '--input-default-bindings=no',
       `--input-ipc-server=${pipe}`
     ];
@@ -59,6 +60,7 @@ class MpvPlayer extends EventEmitter {
     this._send(['observe_property', 1, 'time-pos']);
     this._send(['observe_property', 2, 'duration']);
     this._send(['observe_property', 3, 'pause']);
+    this.setOscVisible('never'); // windowed by default → app's bar drives the UI
   }
 
   _cleanup() { this.proc = null; this.sock = null; this.buf = ''; this.pending.clear(); }
@@ -120,6 +122,9 @@ class MpvPlayer extends EventEmitter {
   setVolume(v) { return this._send(['set_property', 'volume', Math.max(0, Math.min(130, Number(v) || 0))]).catch(() => {}); }
   seekRelative(d) { return this._send(['seek', Number(d) || 0, 'relative']).catch(() => {}); }
   addSubtitle(path) { return this._send(['sub-add', path, 'select']).catch(() => {}); }
+  // Toggle mpv's native OSC (floating control bar). 'auto' = show on hover
+  // (used in fullscreen), 'never' = hidden (windowed → the app's bar is the UI).
+  setOscVisible(mode) { return this._send(['script-message', 'osc-visibility', mode === 'auto' ? 'auto' : 'never', 'no-osd']).catch(() => {}); }
   async getPosition() { try { return await this._send(['get_property', 'time-pos']); } catch { return null; } }
   stop() {
     if (!this.proc) return;

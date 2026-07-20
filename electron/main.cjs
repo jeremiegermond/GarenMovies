@@ -404,6 +404,7 @@ ipcMain.handle('solo:set-visible', (_e, visible) => {
   if (visible) mpvWin.showInactive(); else mpvWin.hide();
 });
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
+ipcMain.handle('solo:osc', (_e, mode) => mpv.setOscVisible(mode));
 ipcMain.handle('solo:volume', (_e, v) => mpv.setVolume(v));
 ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));
 ipcMain.handle('solo:seek-rel', (_e, d) => mpv.seekRelative(d));

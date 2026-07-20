@@ -1780,15 +1780,8 @@ input:disabled { opacity: 0.5; }
   background: var(--bg-elevated);
   transition: opacity 0.25s var(--ease);
 }
-/* Fullscreen: bar out of flow so the stage (and mpv) fills the whole screen;
-   the bar floats at the bottom (mpv is shrunk by its height when visible). */
-.solo-app.solo-fs .solo-player-view { position: relative; }
-.solo-app.solo-fs .solo-playbar {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 64px; z-index: 5;
-  background: rgba(19, 19, 23, 0.92); backdrop-filter: blur(12px);
-}
-/* Fullscreen idle: fade the control bar and hide the cursor after 2s. */
-.solo-app.solo-idle .solo-playbar { opacity: 0; pointer-events: none; }
+/* Fullscreen: the app bar is hidden and mpv's own floating OSC drives playback
+   (it overlays the video natively and hides the cursor after 1s). */
 .solo-app.solo-idle .solo-stage,
 .solo-app.solo-idle { cursor: none; }
 .solo-nowplaying {
