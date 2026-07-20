@@ -82,6 +82,11 @@ function buildArgs(inputPath, audioIdx, dir, hwInfo) {
   // and cheap. (5.1 AAC sometimes won't decode in Chromium.)
   args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
 
+  // Start the MPEG-TS at PTS ~0 instead of ffmpeg's default ~1.4s mux delay.
+  // Otherwise the transcoded timeline is shifted vs the source, so sidecar
+  // subtitles (timed from 0, like VLC plays them) end up ~1.4s out of sync.
+  args.push('-muxdelay', '0', '-muxpreload', '0');
+
   args.push(
     '-f', 'hls',
     '-hls_time', '4',
