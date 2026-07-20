@@ -41,7 +41,8 @@ class MpvPlayer extends EventEmitter {
       '--no-terminal',
       '--keep-open=yes',       // don't close the window at end of file
       '--sub-auto=fuzzy',      // auto-load sidecar .srt next to the video
-      '--osc=yes',             // built-in on-screen controls (drawn on the video)
+      '--osc=no',              // no mpv OSC — the app's control bar is the UI
+      '--input-default-bindings=no',
       `--input-ipc-server=${pipe}`
     ];
     if (opts.wid) {

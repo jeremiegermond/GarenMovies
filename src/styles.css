@@ -1778,7 +1778,12 @@ input:disabled { opacity: 0.5; }
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
+  transition: opacity 0.25s var(--ease);
 }
+/* Fullscreen idle: fade the control bar and hide the cursor after 2s. */
+.solo-app.solo-idle .solo-playbar { opacity: 0; pointer-events: none; }
+.solo-app.solo-idle .solo-stage,
+.solo-app.solo-idle { cursor: none; }
 .solo-nowplaying {
   display: flex; align-items: center; gap: 8px; color: var(--text);
   font-size: 13px; font-weight: 550;

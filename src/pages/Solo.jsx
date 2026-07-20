@@ -24,8 +24,25 @@ export default function Solo({ onLeave }) {
   const [volume, setVolume] = useState(100);
   const [fullscreen, setFullscreen] = useState(false);
   const [showSubSearch, setShowSubSearch] = useState(false);
+  const [uiVisible, setUiVisible] = useState(true);
   const stageRef = useRef(null);
   const seekTarget = useRef(null);
+  const uiTimer = useRef(null);
+  const fsRef = useRef(false);
+  const pokeRef = useRef(() => {});
+
+  // Show the controls + cursor, and (in fullscreen) auto-hide them after 2s idle.
+  function poke() {
+    setUiVisible(true);
+    clearTimeout(uiTimer.current);
+    if (fsRef.current) uiTimer.current = setTimeout(() => setUiVisible(false), 2000);
+  }
+  pokeRef.current = poke;
+  useEffect(() => {
+    fsRef.current = fullscreen;
+    if (fullscreen) poke(); else { setUiVisible(true); clearTimeout(uiTimer.current); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen]);
 
   useEffect(() => {
     window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); setHasOSKey(!!c?.openSubtitlesApiKey); }).catch(() => {});
@@ -35,6 +52,7 @@ export default function Solo({ onLeave }) {
       if (s.stopped) { setPlaying(null); setSt({ position: 0, duration: 0, paused: false }); return; }
       if (s.error) { setError(s.error); return; }
       if (s.fullscreen != null) setFullscreen(s.fullscreen);
+      if (s.activity) pokeRef.current();
       setSt((prev) => ({ ...prev, ...s }));
     });
     return () => { off && off(); window.electronAPI.solo.stop(); };
@@ -106,7 +124,7 @@ export default function Solo({ onLeave }) {
   const hasFilms = (catalog.stream?.length || 0) > 0;
 
   return (
-    <div className={`app solo-app ${fullscreen ? 'solo-fs' : ''}`}>
+    <div className={`app solo-app ${fullscreen ? 'solo-fs' : ''} ${fullscreen && !uiVisible ? 'solo-idle' : ''}`} onMouseMove={poke}>
       {!fullscreen && (
         <div className="solo-topbar">
           <button className="icon-btn" onClick={playing ? backToLibrary : onLeave} title={playing ? 'Retour à la bibliothèque' : 'Retour à l\'accueil'}>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -78,6 +78,7 @@ async function createWindow() {
     minHeight: 640,
     backgroundColor: '#0f1115',
     icon: path.join(__dirname, 'icon.png'),
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -354,6 +355,23 @@ function mpvWid() {
 }
 
 let mpvHidden = false; // intentionally hidden (e.g. while an HTML dialog is open over the video)
+// The mpv video is a native window over the web page, so the renderer never
+// sees mouse-move over the video. Poll the cursor here and notify the renderer
+// so it can show/auto-hide the controls in fullscreen.
+let cursorWatch = null, lastCursor = null;
+function startCursorWatch() {
+  if (cursorWatch) return;
+  cursorWatch = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const p = screen.getCursorScreenPoint();
+    if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) {
+      lastCursor = p;
+      mainWindow.webContents.send('solo:status', { activity: Date.now() });
+    }
+  }, 250);
+}
+function stopCursorWatch() { if (cursorWatch) { clearInterval(cursorWatch); cursorWatch = null; } }
+
 ipcMain.handle('solo:open', async (_e, filePath) => {
   const win = ensureMpvWindow();
   const wid = win ? mpvWid() : null;
@@ -361,6 +379,7 @@ ipcMain.handle('solo:open', async (_e, filePath) => {
     await mpv.loadFile(filePath, wid);      // wid → embedded; null → mpv's own window (fallback)
     mpvHidden = false;
     if (win) win.showInactive();
+    startCursorWatch();
     return { ok: true, embedded: !!wid };
   } catch (e) { return { error: e.message }; }
 });
@@ -407,7 +426,7 @@ ipcMain.handle('solo:load-subtitle', (_e, { mediaId, subIdx } = {}) => {
   } catch (e) { return { error: e.message }; }
 });
 ipcMain.handle('solo:position', () => mpv.getPosition());
-ipcMain.handle('solo:stop', () => { mpv.stop(); if (mpvWin && !mpvWin.isDestroyed()) mpvWin.hide(); });
+ipcMain.handle('solo:stop', () => { mpv.stop(); stopCursorWatch(); if (mpvWin && !mpvWin.isDestroyed()) mpvWin.hide(); });
 
 ipcMain.handle('subs:pick', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
