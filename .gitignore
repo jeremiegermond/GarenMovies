@@ -24,3 +24,6 @@ requete.txt
 
 # Release notes (kept out of the repo, pasted into GitHub releases)
 RELEASE_NOTES_*.md
+
+# Bundled mpv binary (fetched via scripts/fetch-mpv.cjs, not committed)
+/bin/

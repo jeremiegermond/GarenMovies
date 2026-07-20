@@ -12,6 +12,7 @@ const ffmpeg = require('./server/ffmpeg.cjs');
 const vlc = require('./server/vlc.cjs');
 const hls = require('./server/hls.cjs');
 const torrents = require('./server/torrents.cjs');
+const mpv = require('./mpv.cjs');
 const { initAutoUpdate } = require('./updater.cjs');
 
 const isDev = !app.isPackaged;
@@ -227,6 +228,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', async () => {
   hls.stopAll();
+  mpv.stop();
   await tunnel.stop();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -304,6 +306,36 @@ ipcMain.handle('torrents:add-videos', async (_e, paths) => {
   }
   return { added, skipped };
 });
+
+// ── Solo mode (native mpv player) ──
+mpv.on('property', (name, data) => {
+  const patch = {};
+  if (name === 'time-pos' && data != null) patch.position = data;
+  else if (name === 'duration' && data != null) patch.duration = data;
+  else if (name === 'pause') patch.paused = !!data;
+  else return;
+  mainWindow?.webContents.send('solo:status', patch);
+});
+mpv.on('stopped', () => mainWindow?.webContents.send('solo:status', { stopped: true }));
+mpv.on('error', (e) => mainWindow?.webContents.send('solo:status', { error: e.message }));
+
+ipcMain.handle('solo:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Choisis un film à regarder en solo',
+    filters: [{ name: 'Vidéos', extensions: ['mp4', 'mkv', 'avi', 'webm', 'mov', 'm4v'] }]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+ipcMain.handle('solo:open', async (_e, filePath) => {
+  try { await mpv.loadFile(filePath); return { ok: true }; }
+  catch (e) { return { error: e.message }; }
+});
+ipcMain.handle('solo:toggle', () => mpv.togglePause());
+ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));
+ipcMain.handle('solo:position', () => mpv.getPosition());
+ipcMain.handle('solo:stop', () => { mpv.stop(); });
 
 ipcMain.handle('subs:pick', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

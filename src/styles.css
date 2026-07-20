@@ -1734,3 +1734,72 @@ input:disabled { opacity: 0.5; }
   margin-bottom: -24px; /* trim the 40px column gap so the button sits close to the first section */
 }
 .catalogue-toolbar button { padding: 7px 14px; }
+
+/* ── Home solo link ── */
+.home-solo-link {
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.home-solo-link:hover { background: var(--accent-soft); color: var(--text); }
+
+/* ── Solo mode screen ── */
+.solo-app { height: 100vh; display: flex; flex-direction: column; }
+.solo-topbar {
+  height: 56px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px; border-bottom: 1px solid var(--border-faint);
+  background: rgba(10, 10, 13, 0.8);
+}
+.solo-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 32px; }
+
+.solo-empty { text-align: center; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.solo-empty-icon {
+  width: 76px; height: 76px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--text); margin-bottom: 4px;
+}
+.solo-empty h2 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+.solo-empty p { font-size: 14px; color: var(--text-tertiary); margin: 0 0 8px; line-height: 1.5; }
+.solo-empty .primary { padding: 10px 20px; }
+
+.solo-player { width: min(680px, 100%); display: flex; flex-direction: column; gap: 18px; }
+.solo-window-hint {
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  font-size: 12px; color: var(--text-tertiary);
+  background: var(--bg-elevated); border: 1px solid var(--border-faint);
+  border-radius: var(--r-md); padding: 10px 14px;
+}
+.solo-nowplaying {
+  display: flex; align-items: center; gap: 10px; color: var(--text);
+  font-size: 15px; font-weight: 550; justify-content: center;
+}
+.solo-file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px; }
+
+.solo-controls {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 14px 18px;
+}
+.solo-play {
+  width: 44px; height: 44px; padding: 0; flex-shrink: 0;
+  border-radius: 50%; background: var(--text); color: var(--bg-base); border: none;
+}
+.solo-play:hover { background: #fff; }
+.solo-stop {
+  width: 36px; height: 36px; padding: 0; flex-shrink: 0; border-radius: var(--r-md);
+  color: var(--text-secondary);
+}
+.solo-time { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
+.solo-seek {
+  flex: 1; width: auto; padding: 0; background: transparent; border: none;
+  accent-color: var(--text); cursor: pointer;
+}
+.solo-actions { display: flex; gap: 10px; justify-content: center; }
+.solo-actions button { padding: 8px 14px; font-size: 13px; }
+.solo-share { color: var(--text-tertiary); }

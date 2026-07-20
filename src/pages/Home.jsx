@@ -1,6 +1,7 @@
-import { Tv, Users } from 'lucide-react';
+import { Tv, Users, PlayCircle } from 'lucide-react';
 
 export default function Home({ onPick }) {
+  const soloAvailable = !!window.electronAPI?.solo;
   return (
     <div className="app home-app">
       <div className="home">
@@ -29,6 +30,12 @@ export default function Home({ onPick }) {
             </p>
           </button>
         </div>
+        {soloAvailable && (
+          <button className="home-solo-link" onClick={() => onPick('solo')}>
+            <PlayCircle size={16} strokeWidth={1.75} />
+            Ou regarder un film en solo, sans salon
+          </button>
+        )}
       </div>
     </div>
   );

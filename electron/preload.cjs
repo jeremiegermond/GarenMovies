@@ -38,5 +38,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     download: () => ipcRenderer.invoke('update:download'),
     install: () => ipcRenderer.invoke('update:install'),
     check: () => ipcRenderer.invoke('update:check')
+  },
+  solo: {
+    pick: () => ipcRenderer.invoke('solo:pick'),
+    open: (filePath) => ipcRenderer.invoke('solo:open', filePath),
+    toggle: () => ipcRenderer.invoke('solo:toggle'),
+    seek: (t) => ipcRenderer.invoke('solo:seek', t),
+    position: () => ipcRenderer.invoke('solo:position'),
+    stop: () => ipcRenderer.invoke('solo:stop'),
+    onStatus: (cb) => {
+      const handler = (_e, status) => cb(status);
+      ipcRenderer.on('solo:status', handler);
+      return () => ipcRenderer.removeListener('solo:status', handler);
+    }
   }
 });

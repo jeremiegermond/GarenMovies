@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Home from './pages/Home.jsx';
 import Host from './pages/Host.jsx';
 import Client from './pages/Client.jsx';
+import Solo from './pages/Solo.jsx';
 import UpdateModal from './components/UpdateModal.jsx';
 
 export default function App() {
@@ -12,6 +13,7 @@ export default function App() {
       {screen === 'home' && <Home onPick={setScreen} />}
       {screen === 'host' && <Host onLeave={() => setScreen('home')} />}
       {screen === 'client' && <Client onLeave={() => setScreen('home')} />}
+      {screen === 'solo' && <Solo onLeave={() => setScreen('home')} />}
       <UpdateModal />
     </>
   );
