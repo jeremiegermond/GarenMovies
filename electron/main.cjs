@@ -177,7 +177,10 @@ app.whenReady().then(async () => {
       }
     }
   } catch {}
-  serverInfo = await startServer(SERVER_PORT, { audioCacheDir });
+  serverInfo = await startServer(SERVER_PORT, {
+    audioCacheDir,
+    importedSubsDir: path.join(app.getPath('userData'), 'imported-subs')
+  });
   // Drop partial HLS segment dirs from a previous run (keep complete ones warm).
   hls.sweepPartials();
 
@@ -300,6 +303,16 @@ ipcMain.handle('torrents:add-videos', async (_e, paths) => {
     } catch (e) { console.error('Rescan after add failed:', e); }
   }
   return { added, skipped };
+});
+
+ipcMain.handle('subs:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Choisis un fichier de sous-titres',
+    filters: [{ name: 'Sous-titres', extensions: ['srt', 'vtt', 'ass'] }]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
 });
 
 ipcMain.handle('dialog:pick-folder', async () => {

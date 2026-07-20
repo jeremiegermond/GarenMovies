@@ -29,6 +29,20 @@ const MAX_CHAT = 50;
 let hostSocketId = null;
 let io = null;
 let audioCacheDir = null;
+let importedSubsDir = null;
+
+const SUB_LANGS = {
+  fr: 'Français', fre: 'Français', fra: 'Français', en: 'English', eng: 'English',
+  es: 'Español', spa: 'Español', de: 'Deutsch', ger: 'Deutsch', deu: 'Deutsch',
+  it: 'Italiano', ita: 'Italiano', pt: 'Português', por: 'Português',
+  ja: '日本語', jpn: '日本語', zh: '中文', chi: '中文', ar: 'العربية', ara: 'العربية',
+  ru: 'Русский', rus: 'Русский'
+};
+function inferSubLang(filename) {
+  const cands = String(filename).toLowerCase().match(/[.\-_ ]([a-z]{2,3})(?=[.\-_ ]|$)/g) || [];
+  for (const c of cands) { const code = c.replace(/[.\-_ ]/g, ''); if (SUB_LANGS[code]) return code; }
+  return null;
+}
 
 // In-memory remux job tracking: key = `${mediaId}:${audioIdx}`
 const remuxJobs = new Map();
@@ -211,6 +225,8 @@ function startServer(port, opts = {}) {
     // HLS segment dirs live alongside the MP4 audio cache.
     hls.setCacheDir(audioCacheDir);
   }
+  importedSubsDir = opts.importedSubsDir || null;
+  if (importedSubsDir) { try { fs.mkdirSync(importedSubsDir, { recursive: true }); } catch {} }
 
   return new Promise((resolve, reject) => {
     const app = express();
@@ -404,6 +420,36 @@ function startServer(port, opts = {}) {
           requests: result.requests,
           resetTime: result.resetTime
         });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    // Import a local subtitle file (host picks it via the OS dialog) onto a
+    // film: copy it into an app-managed dir, register it, tell everyone.
+    app.post('/api/subs/import', (req, res) => {
+      const { mediaId, filePath, lang } = req.body || {};
+      const m = getMedia(mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      if (!filePath) return res.status(400).json({ error: 'filePath requis' });
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      if (!['srt', 'vtt', 'ass'].includes(ext)) {
+        return res.status(400).json({ error: 'Format non supporté (.srt, .vtt ou .ass)' });
+      }
+      if (!importedSubsDir) return res.status(500).json({ error: 'Dossier de sous-titres non configuré' });
+      try {
+        fs.mkdirSync(importedSubsDir, { recursive: true });
+        const detectedLang = lang || inferSubLang(path.basename(filePath));
+        const dest = path.join(importedSubsDir, `${mediaId}-${Date.now()}.${ext}`);
+        fs.copyFileSync(filePath, dest);
+        const sub = addDownloadedSub(mediaId, {
+          path: dest, lang: detectedLang || 'und', ext, source: 'import',
+          label: detectedLang ? undefined : 'Importé'
+        });
+        if (!sub) return res.status(500).json({ error: 'Ajout impossible' });
+        broadcastCatalog();
+        if (io) io.emit('sub:activate', { mediaId, idx: sub.idx });
+        res.json({ sub: { idx: sub.idx, lang: sub.lang, label: sub.label, embedded: false, type: sub.type } });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 
 const SYNC_THRESHOLD = 1.0;
@@ -326,6 +326,42 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setActiveSubIdx(idx);
   }
 
+  // Import a local subtitle file onto this film (host only). The server copies
+  // it, adds it to the catalog and broadcasts `sub:activate`, so it shows up and
+  // auto-activates here (and for guests too).
+  const [importingSub, setImportingSub] = useState(false);
+  async function importSubtitleFromPath(filePath) {
+    if (!filePath || !mediaId) return;
+    setImportingSub(true);
+    try {
+      const r = await fetch(`${streamBase}/api/subs/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaId, filePath })
+      });
+      const data = await r.json();
+      if (data?.error) console.warn('[subs] import failed:', data.error);
+    } catch (e) {
+      console.warn('[subs] import error:', e.message);
+    } finally {
+      setImportingSub(false);
+    }
+  }
+  async function importSubtitle() {
+    if (!window.electronAPI?.pickSubtitle) return;
+    setShowSubMenu(false);
+    const filePath = await window.electronAPI.pickSubtitle();
+    await importSubtitleFromPath(filePath);
+  }
+  function onDropSubtitle(e) {
+    if (!isHost || !window.electronAPI?.getPathForFile) return;
+    const file = Array.from(e.dataTransfer?.files || []).find((f) => /\.(srt|vtt|ass)$/i.test(f.name));
+    if (!file) return;
+    e.preventDefault();
+    const p = window.electronAPI.getPathForFile(file);
+    if (p) importSubtitleFromPath(p);
+  }
+
   // Drive the progressive-HLS prep job: kick off the transcode, then poll until
   // the first segment is ready (typically <1s). Once ready, the hls.js effect
   // attaches the growing playlist to the <video> element.
@@ -511,7 +547,12 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const showVideoError = !!videoError && !showPrepOverlay && !showPrepError;
 
   return (
-    <div className="player-wrap" ref={wrapRef}>
+    <div
+      className="player-wrap"
+      ref={wrapRef}
+      onDragOver={isHost ? (e) => e.preventDefault() : undefined}
+      onDrop={isHost ? onDropSubtitle : undefined}
+    >
       {(effectiveSrc || hlsActive) ? (
         <video
           ref={videoRef}
@@ -746,6 +787,12 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                   <Search size={13} strokeWidth={2} />
                   Rechercher en ligne
                 </button>
+                {isHost && window.electronAPI?.pickSubtitle && (
+                  <button className="overlay-action" onClick={importSubtitle} disabled={importingSub}>
+                    {importingSub ? <Loader2 size={13} className="spin" /> : <FileUp size={13} strokeWidth={2} />}
+                    Importer un fichier (.srt/.vtt/.ass)
+                  </button>
+                )}
               </div>
             </>
           )}

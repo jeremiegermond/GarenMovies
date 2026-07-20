@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
   pickFolder: () => ipcRenderer.invoke('dialog:pick-folder'),
+  pickSubtitle: () => ipcRenderer.invoke('subs:pick'),
   scanFolder: (folder) => ipcRenderer.invoke('catalog:scan', folder),
   rescan: () => ipcRenderer.invoke('catalog:rescan'),
   getCatalog: () => ipcRenderer.invoke('catalog:list'),
