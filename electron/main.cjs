@@ -335,8 +335,8 @@ function ensureMpvWindow() {
   if (mpvWin && !mpvWin.isDestroyed()) return mpvWin;
   try {
     mpvWin = new BrowserWindow({
-      parent: mainWindow, frame: false, backgroundColor: '#000000', show: false,
-      resizable: false, movable: false, minimizable: false, maximizable: false,
+      parent: mainWindow, frame: false, transparent: true, backgroundColor: '#00000000',
+      show: false, resizable: false, movable: false, minimizable: false, maximizable: false,
       skipTaskbar: true, focusable: false, hasShadow: false, webPreferences: {}
     });
     mpvWin.on('closed', () => { mpvWin = null; });
@@ -372,6 +372,7 @@ ipcMain.handle('solo:region', (_e, rect) => {
   } catch {}
 });
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
+ipcMain.handle('solo:volume', (_e, v) => mpv.setVolume(v));
 ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));
 ipcMain.handle('solo:position', () => mpv.getPosition());
 ipcMain.handle('solo:stop', () => { mpv.stop(); if (mpvWin && !mpvWin.isDestroyed()) mpvWin.hide(); });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, Square, FolderOpen, Film, Library } from 'lucide-react';
+import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2 } from 'lucide-react';
 import CatalogueView from '../components/CatalogueView.jsx';
 
 function fmt(t) {
@@ -18,6 +18,7 @@ export default function Solo({ onLeave }) {
   const [error, setError] = useState(null);
   const [st, setSt] = useState({ position: 0, duration: 0, paused: false });
   const [scrub, setScrub] = useState(null);
+  const [volume, setVolume] = useState(100);
   const stageRef = useRef(null);
 
   useEffect(() => {
@@ -102,6 +103,12 @@ export default function Solo({ onLeave }) {
               onMouseUp={(e) => { window.electronAPI.solo.seek(Number(e.target.value)); setScrub(null); }}
             />
             <span className="solo-time">{fmt(dur)}</span>
+            <Volume2 size={15} strokeWidth={1.75} className="solo-vol-icon" />
+            <input
+              className="solo-vol" type="range" min={0} max={130} step={1} value={volume}
+              onChange={(e) => { const v = Number(e.target.value); setVolume(v); window.electronAPI.solo.volume(v); }}
+              title="Volume"
+            />
             <button className="solo-stop" onClick={backToLibrary} title="Bibliothèque">
               <Library size={15} strokeWidth={2} />
             </button>

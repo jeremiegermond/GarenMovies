@@ -116,6 +116,7 @@ class MpvPlayer extends EventEmitter {
   pause() { return this._send(['set_property', 'pause', true]).catch(() => {}); }
   togglePause() { return this._send(['cycle', 'pause']).catch(() => {}); }
   seekAbsolute(t) { return this._send(['set_property', 'time-pos', Number(t) || 0]).catch(() => {}); }
+  setVolume(v) { return this._send(['set_property', 'volume', Math.max(0, Math.min(130, Number(v) || 0))]).catch(() => {}); }
   async getPosition() { try { return await this._send(['get_property', 'time-pos']); } catch { return null; } }
   stop() {
     if (!this.proc) return;

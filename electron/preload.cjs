@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     open: (filePath) => ipcRenderer.invoke('solo:open', filePath),
     region: (rect) => ipcRenderer.invoke('solo:region', rect),
     toggle: () => ipcRenderer.invoke('solo:toggle'),
+    volume: (v) => ipcRenderer.invoke('solo:volume', v),
     seek: (t) => ipcRenderer.invoke('solo:seek', t),
     position: () => ipcRenderer.invoke('solo:position'),
     stop: () => ipcRenderer.invoke('solo:stop'),

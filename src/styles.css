@@ -1799,3 +1799,5 @@ input:disabled { opacity: 0.5; }
   flex: 1; width: auto; padding: 0; background: transparent; border: none;
   accent-color: var(--text); cursor: pointer;
 }
+.solo-vol-icon { color: var(--text-tertiary); flex-shrink: 0; }
+.solo-vol { width: 84px; flex: none; padding: 0; background: transparent; border: none; accent-color: var(--text); cursor: pointer; }
