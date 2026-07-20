@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, Square, FolderOpen, Film, Monitor } from 'lucide-react';
+import { ChevronLeft, Play, Pause, Square, FolderOpen, Film, Library } from 'lucide-react';
 import CatalogueView from '../components/CatalogueView.jsx';
 
 function fmt(t) {
@@ -18,6 +18,7 @@ export default function Solo({ onLeave }) {
   const [error, setError] = useState(null);
   const [st, setSt] = useState({ position: 0, duration: 0, paused: false });
   const [scrub, setScrub] = useState(null);
+  const stageRef = useRef(null);
 
   useEffect(() => {
     window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); }).catch(() => {});
@@ -29,6 +30,22 @@ export default function Solo({ onLeave }) {
     });
     return () => { off && off(); window.electronAPI.solo.stop(); };
   }, []);
+
+  // Keep the embedded mpv window glued to the on-screen video stage.
+  useEffect(() => {
+    if (!playing || !stageRef.current) return;
+    const el = stageRef.current;
+    const send = () => {
+      const r = el.getBoundingClientRect();
+      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
+    };
+    send();
+    const ro = new ResizeObserver(send);
+    ro.observe(el);
+    window.addEventListener('resize', send);
+    const iv = setInterval(send, 500); // follow window moves (no move event in the renderer)
+    return () => { ro.disconnect(); window.removeEventListener('resize', send); clearInterval(iv); };
+  }, [playing]);
 
   async function reload() { try { setCatalog(await window.electronAPI.getCatalog()); } catch {} }
   async function pickFolder() {
@@ -50,6 +67,7 @@ export default function Solo({ onLeave }) {
     if (res?.error) { setError(res.error); return; }
     setPlaying({ id: film.id, name: film.title });
   }
+  function backToLibrary() { window.electronAPI.solo.stop(); setPlaying(null); }
 
   const pos = scrub != null ? scrub : (st.position || 0);
   const dur = st.duration || 0;
@@ -58,18 +76,42 @@ export default function Solo({ onLeave }) {
   return (
     <div className="app solo-app">
       <div className="solo-topbar">
-        <button className="icon-btn" onClick={onLeave} title="Retour à l'accueil">
+        <button className="icon-btn" onClick={playing ? backToLibrary : onLeave} title={playing ? 'Retour à la bibliothèque' : 'Retour à l\'accueil'}>
           <ChevronLeft size={18} strokeWidth={1.75} />
         </button>
-        <div className="brand">Garen<span className="brand-accent">Movies</span> · Solo</div>
+        <div className="brand">Garen<span className="brand-accent">Movies</span> · Solo{playing ? ' · lecture' : ''}</div>
         <div style={{ width: 36 }} />
       </div>
 
-      <div className="solo-main">
-        {hasFilms || folder ? (
+      {playing ? (
+        <div className="solo-player-view">
+          <div className="solo-stage" ref={stageRef} />
+          <div className="solo-playbar">
+            <div className="solo-nowplaying">
+              <Film size={14} strokeWidth={1.75} />
+              <span className="solo-file" title={playing.name}>{playing.name}</span>
+            </div>
+            <button className="solo-play" onClick={() => window.electronAPI.solo.toggle()}>
+              {st.paused ? <Play size={18} strokeWidth={2} fill="currentColor" /> : <Pause size={18} strokeWidth={2} fill="currentColor" />}
+            </button>
+            <span className="solo-time">{fmt(pos)}</span>
+            <input
+              className="solo-seek"
+              type="range" min={0} max={Math.max(dur, 0.1)} step={0.1} value={Math.min(pos, dur || pos)}
+              onChange={(e) => setScrub(Number(e.target.value))}
+              onMouseUp={(e) => { window.electronAPI.solo.seek(Number(e.target.value)); setScrub(null); }}
+            />
+            <span className="solo-time">{fmt(dur)}</span>
+            <button className="solo-stop" onClick={backToLibrary} title="Bibliothèque">
+              <Library size={15} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      ) : (hasFilms || folder) ? (
+        <div className="solo-main">
           <CatalogueView
             catalog={catalog}
-            activeId={playing?.id || null}
+            activeId={null}
             onSelect={playFilm}
             canSelect={true}
             connected={true}
@@ -82,7 +124,9 @@ export default function Solo({ onLeave }) {
             streamTitle="Bibliothèque"
             onOpenSettings={() => {}}
           />
-        ) : (
+        </div>
+      ) : (
+        <div className="solo-main">
           <div className="solo-empty">
             <div className="solo-empty-icon"><Film size={40} strokeWidth={1.25} /></div>
             <h2>Regarder un film en solo</h2>
@@ -93,29 +137,6 @@ export default function Solo({ onLeave }) {
             </button>
             {error && <div className="error">{error}</div>}
           </div>
-        )}
-      </div>
-
-      {playing && (
-        <div className="solo-playbar">
-          <div className="solo-nowplaying">
-            <Monitor size={14} strokeWidth={1.75} />
-            <span className="solo-file" title={playing.name}>{playing.name}</span>
-          </div>
-          <button className="solo-play" onClick={() => window.electronAPI.solo.toggle()}>
-            {st.paused ? <Play size={18} strokeWidth={2} fill="currentColor" /> : <Pause size={18} strokeWidth={2} fill="currentColor" />}
-          </button>
-          <span className="solo-time">{fmt(pos)}</span>
-          <input
-            className="solo-seek"
-            type="range" min={0} max={Math.max(dur, 0.1)} step={0.1} value={Math.min(pos, dur || pos)}
-            onChange={(e) => setScrub(Number(e.target.value))}
-            onMouseUp={(e) => { window.electronAPI.solo.seek(Number(e.target.value)); setScrub(null); }}
-          />
-          <span className="solo-time">{fmt(dur)}</span>
-          <button className="solo-stop" onClick={() => window.electronAPI.solo.stop()} title="Arrêter">
-            <Square size={14} strokeWidth={2} fill="currentColor" />
-          </button>
         </div>
       )}
     </div>

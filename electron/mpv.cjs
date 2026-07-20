@@ -31,21 +31,26 @@ class MpvPlayer extends EventEmitter {
 
   isRunning() { return !!this.proc; }
 
-  async start(extraArgs = []) {
+  async start(opts = {}) {
     if (this.proc) return;
     const pipe = `\\\\.\\pipe\\garen-mpv-${process.pid}`;
     const bin = mpvBinaryPath();
     if (!fs.existsSync(bin)) throw new Error('mpv introuvable (binaire non installé)');
-    this.proc = spawn(bin, [
-      '--force-window=immediate',
+    const args = [
       '--idle=yes',
       '--no-terminal',
       '--keep-open=yes',       // don't close the window at end of file
       '--sub-auto=fuzzy',      // auto-load sidecar .srt next to the video
-      '--osc=yes',             // built-in on-screen controls
-      `--input-ipc-server=${pipe}`,
-      ...extraArgs
-    ], { windowsHide: false });
+      '--osc=yes',             // built-in on-screen controls (drawn on the video)
+      `--input-ipc-server=${pipe}`
+    ];
+    if (opts.wid) {
+      // Embed mpv's rendering into an existing window (the app's video area).
+      args.push(`--wid=${opts.wid}`);
+    } else {
+      args.push('--force-window=immediate'); // fallback: mpv's own window
+    }
+    this.proc = spawn(bin, args, { windowsHide: false });
     this.proc.on('exit', () => { this._cleanup(); this.emit('stopped'); });
     this.proc.on('error', (e) => { this._cleanup(); this.emit('error', e); });
     await this._connect(pipe);
@@ -106,7 +111,7 @@ class MpvPlayer extends EventEmitter {
     });
   }
 
-  async loadFile(file) { await this.start(); return this._send(['loadfile', file, 'replace']); }
+  async loadFile(file, wid) { await this.start(wid ? { wid } : {}); return this._send(['loadfile', file, 'replace']); }
   play() { return this._send(['set_property', 'pause', false]).catch(() => {}); }
   pause() { return this._send(['set_property', 'pause', true]).catch(() => {}); }
   togglePause() { return this._send(['cycle', 'pause']).catch(() => {}); }

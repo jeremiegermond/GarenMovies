@@ -328,14 +328,53 @@ ipcMain.handle('solo:pick', async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
+// A frameless child window that hosts mpv's rendering, positioned over the
+// app's video area (mpv can't be an HTML overlay — it's a native surface).
+let mpvWin = null;
+function ensureMpvWindow() {
+  if (mpvWin && !mpvWin.isDestroyed()) return mpvWin;
+  try {
+    mpvWin = new BrowserWindow({
+      parent: mainWindow, frame: false, backgroundColor: '#000000', show: false,
+      resizable: false, movable: false, minimizable: false, maximizable: false,
+      skipTaskbar: true, focusable: false, hasShadow: false, webPreferences: {}
+    });
+    mpvWin.on('closed', () => { mpvWin = null; });
+  } catch (e) { console.warn('[solo] mpv child window failed:', e.message); mpvWin = null; }
+  return mpvWin;
+}
+function mpvWid() {
+  if (!mpvWin || mpvWin.isDestroyed()) return null;
+  try { return mpvWin.getNativeWindowHandle().readBigUInt64LE(0).toString(); }
+  catch { return null; }
+}
+
 ipcMain.handle('solo:open', async (_e, filePath) => {
-  try { await mpv.loadFile(filePath); return { ok: true }; }
-  catch (e) { return { error: e.message }; }
+  const win = ensureMpvWindow();
+  const wid = win ? mpvWid() : null;
+  try {
+    await mpv.loadFile(filePath, wid);      // wid → embedded; null → mpv's own window (fallback)
+    if (win) win.showInactive();
+    return { ok: true, embedded: !!wid };
+  } catch (e) { return { error: e.message }; }
+});
+ipcMain.handle('solo:region', (_e, rect) => {
+  if (!mpvWin || mpvWin.isDestroyed() || !mainWindow || !rect) return;
+  const cb = mainWindow.getContentBounds();
+  try {
+    mpvWin.setBounds({
+      x: Math.round(cb.x + (rect.x || 0)),
+      y: Math.round(cb.y + (rect.y || 0)),
+      width: Math.max(1, Math.round(rect.width || 0)),
+      height: Math.max(1, Math.round(rect.height || 0))
+    });
+    if (!mpvWin.isVisible()) mpvWin.showInactive();
+  } catch {}
 });
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
 ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));
 ipcMain.handle('solo:position', () => mpv.getPosition());
-ipcMain.handle('solo:stop', () => { mpv.stop(); });
+ipcMain.handle('solo:stop', () => { mpv.stop(); if (mpvWin && !mpvWin.isDestroyed()) mpvWin.hide(); });
 
 ipcMain.handle('subs:pick', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
