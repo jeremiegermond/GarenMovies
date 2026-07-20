@@ -1759,7 +1759,29 @@ input:disabled { opacity: 0.5; }
 .solo-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* In-app player: mpv paints natively over this stage; controls sit below it. */
 .solo-player-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.solo-stage { flex: 1; min-height: 0; background: #000; }
+.solo-body { flex: 1; min-height: 0; display: flex; }
+.solo-stage { flex: 1; min-width: 0; min-height: 0; background: #000; }
+
+/* Shared-mode sidebar: room link + viewers + chat, alongside the video. */
+.solo-side {
+  width: 340px; flex-shrink: 0;
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--border-faint); background: var(--bg-base);
+}
+.solo-side .room-block { padding: 16px; border-bottom: 1px solid var(--border-faint); }
+.solo-side .chat-panel { width: 100%; flex: 1; min-height: 0; border-left: none; }
+.solo-stop-share {
+  margin-top: 2px; font-size: 12px; color: var(--text-tertiary);
+  background: transparent; border: 1px solid var(--border-faint);
+}
+.solo-stop-share:hover { color: var(--text); border-color: var(--border); }
+.solo-invite { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 550; }
+.solo-share-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 550; color: var(--text-secondary);
+  padding: 5px 10px; border-radius: var(--r-md);
+  background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.22);
+}
 
 .solo-empty { margin: auto; text-align: center; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px; }
 .solo-empty-icon {

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions } from 'lucide-react';
+import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions, Users, Globe, Copy, Check } from 'lucide-react';
+import { io } from 'socket.io-client';
 import CatalogueView from '../components/CatalogueView.jsx';
 import SubtitleSearchModal from '../components/SubtitleSearchModal.jsx';
+import Chat from '../components/Chat.jsx';
 
 const BAR_H = 64; // control-bar height reserved at the bottom when controls show in fullscreen
+const NICK_KEY = 'garenmovies-nickname';
 
 function fmt(t) {
   if (t == null || isNaN(t)) return '0:00';
@@ -27,13 +30,28 @@ export default function Solo({ onLeave }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [showSubSearch, setShowSubSearch] = useState(false);
   const [uiVisible, setUiVisible] = useState(true);
+  // Shared mode: broadcast this solo session as a room so friends can join and
+  // sync to mpv's clock, without interrupting the host's native playback.
+  const [serverInfo, setServerInfo] = useState(null);
+  const [shared, setShared] = useState(false);
+  const [viewers, setViewers] = useState(0);
+  const [tunnelURL, setTunnelURL] = useState(null);
+  const [tunnelLoading, setTunnelLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [nickname] = useState(() => localStorage.getItem(NICK_KEY) || 'Hôte');
   const stageRef = useRef(null);
   const seekTarget = useRef(null);
   const uiTimer = useRef(null);
   const fsRef = useRef(false);
   const uiVisibleRef = useRef(true);
   const pokeRef = useRef(() => {});
+  const socketRef = useRef(null);
+  const stRef = useRef(st);
+  const playingRef = useRef(playing);
+  const sharedRef = useRef(false);
   uiVisibleRef.current = uiVisible;
+  stRef.current = st;
+  playingRef.current = playing;
 
   // Show the controls + cursor, and (in fullscreen) auto-hide them after 2s idle.
   function poke() {
@@ -50,8 +68,10 @@ export default function Solo({ onLeave }) {
 
   useEffect(() => {
     window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); setHasOSKey(!!c?.openSubtitlesApiKey); }).catch(() => {});
-    window.electronAPI.getServerInfo().then((i) => setStreamBase(`http://localhost:${i.port}`)).catch(() => {});
+    window.electronAPI.getServerInfo().then((i) => { setServerInfo(i); setStreamBase(`http://localhost:${i.port}`); }).catch(() => {});
     window.electronAPI.getCatalog().then(setCatalog).catch(() => {});
+    window.electronAPI.tunnel?.status?.().then((s) => setTunnelURL(s?.url || null)).catch(() => {});
+    const offTunnel = window.electronAPI.tunnel?.onURL?.((url) => setTunnelURL(url));
     const off = window.electronAPI.solo.onStatus((s) => {
       if (s.stopped) { setPlaying(null); setSt({ position: 0, duration: 0, paused: false }); return; }
       if (s.error) { setError(s.error); return; }
@@ -59,7 +79,7 @@ export default function Solo({ onLeave }) {
       if (s.activity) pokeRef.current();
       setSt((prev) => ({ ...prev, ...s }));
     });
-    return () => { off && off(); window.electronAPI.solo.stop(); };
+    return () => { off && off(); offTunnel && offTunnel(); socketRef.current?.disconnect(); window.electronAPI.solo.stop(); };
   }, []);
 
   // Hide the native mpv window while the subtitle dialog is open (HTML can't
@@ -108,6 +128,65 @@ export default function Solo({ onLeave }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [fullscreen]);
 
+  // ── Shared mode ── broadcast mpv's position/pause as the room's sync clock.
+  function pushState(extra) {
+    const p = playingRef.current;
+    if (!p || !socketRef.current) return;
+    socketRef.current.emit('host:state', {
+      mediaId: p.id,
+      currentTime: stRef.current.position || 0,
+      paused: !!stRef.current.paused,
+      ...extra
+    });
+  }
+  function startSharing() {
+    if (!serverInfo || sharedRef.current) return;
+    const socket = io(`http://localhost:${serverInfo.port}`, { transports: ['websocket'] });
+    socketRef.current = socket;
+    socket.on('connect', () => {
+      socket.emit('hello', { role: 'host', nickname });
+      // pushState carries mediaId + real position + pause, so guests land on the
+      // film at the current time (no host:select, which would reset it to 0).
+      pushState();
+    });
+    socket.on('viewers', ({ count }) => setViewers(Math.max(0, count - 1)));
+    socket.on('catalog', (cat) => setCatalog(cat));
+    sharedRef.current = true;
+    setShared(true);
+  }
+  function stopSharing() {
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+    sharedRef.current = false;
+    setShared(false);
+    setViewers(0);
+  }
+  // Push the clock on a steady tick (the server extrapolates in between) and
+  // immediately whenever play/pause flips.
+  useEffect(() => {
+    if (!shared) return;
+    const iv = setInterval(() => pushState(), 1000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shared]);
+  useEffect(() => {
+    if (sharedRef.current) pushState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.paused]);
+
+  async function toggleTunnel() {
+    if (tunnelURL) {
+      setTunnelLoading(true);
+      await window.electronAPI.tunnel.stop();
+      setTunnelURL(null); setTunnelLoading(false);
+      return;
+    }
+    setTunnelLoading(true);
+    const r = await window.electronAPI.tunnel.start();
+    setTunnelLoading(false);
+    if (!r?.error) setTunnelURL(r.url);
+  }
+
   async function reload() { try { setCatalog(await window.electronAPI.getCatalog()); } catch {} }
   async function pickFolder() {
     const f = await window.electronAPI.pickFolder();
@@ -127,14 +206,21 @@ export default function Solo({ onLeave }) {
     const res = await window.electronAPI.solo.open(path);
     if (res?.error) { setError(res.error); return; }
     setPlaying({ id: film.id, name: film.title, meta: film.meta });
+    playingRef.current = { id: film.id, name: film.title, meta: film.meta };
+    if (sharedRef.current) socketRef.current?.emit('host:select', { mediaId: film.id });
   }
-  function backToLibrary() { if (fullscreen) toggleFullscreen(); window.electronAPI.solo.stop(); setPlaying(null); }
+  function backToLibrary() { if (fullscreen) toggleFullscreen(); if (sharedRef.current) stopSharing(); window.electronAPI.solo.stop(); setPlaying(null); }
   async function toggleFullscreen() { const v = await window.electronAPI.solo.fullscreen(); setFullscreen(!!v); }
-  function seekTo(v) { window.electronAPI.solo.seek(v); setScrub(v); seekTarget.current = v; }
+  function seekTo(v) { window.electronAPI.solo.seek(v); setScrub(v); seekTarget.current = v; if (sharedRef.current) pushState({ currentTime: v }); }
+  function skip(d) { window.electronAPI.solo.seekRel(d); if (sharedRef.current) setTimeout(() => pushState(), 300); }
 
   const pos = scrub != null ? scrub : (st.position || 0);
   const dur = st.duration || 0;
   const hasFilms = (catalog.stream?.length || 0) > 0;
+  const lanIP = serverInfo?.lanIPs?.[0];
+  const lanURL = lanIP && serverInfo ? `http://${lanIP}:${serverInfo.port}` : null;
+  const shareURL = tunnelURL || lanURL;
+  function copyURL() { if (!shareURL) return; navigator.clipboard.writeText(shareURL); setCopied(true); setTimeout(() => setCopied(false), 1500); }
 
   return (
     <div className={`app solo-app ${fullscreen ? 'solo-fs' : ''} ${fullscreen && !uiVisible ? 'solo-idle' : ''}`} onMouseMove={poke}>
@@ -143,14 +229,50 @@ export default function Solo({ onLeave }) {
           <button className="icon-btn" onClick={playing ? backToLibrary : onLeave} title={playing ? 'Retour à la bibliothèque' : 'Retour à l\'accueil'}>
             <ChevronLeft size={18} strokeWidth={1.75} />
           </button>
-          <div className="brand">Garen<span className="brand-accent">Movies</span> · Solo{playing ? ' · lecture' : ''}</div>
-          <div style={{ width: 36 }} />
+          <div className="brand">Garen<span className="brand-accent">Movies</span> · {shared ? 'Partagé' : 'Solo'}{playing ? ' · lecture' : ''}</div>
+          {playing ? (
+            shared ? (
+              <div className="solo-share-badge"><span className="dot-online" />{viewers} invité{viewers > 1 ? 's' : ''}</div>
+            ) : (
+              <button className="solo-invite" onClick={startSharing} disabled={!serverInfo} title="Ouvrir un salon pour regarder à plusieurs">
+                <Users size={15} strokeWidth={2} /> Inviter des amis
+              </button>
+            )
+          ) : <div style={{ width: 36 }} />}
         </div>
       )}
 
       {playing ? (
         <div className="solo-player-view">
-          <div className="solo-stage" ref={stageRef} />
+          <div className="solo-body">
+            <div className="solo-stage" ref={stageRef} />
+            {shared && !fullscreen && (
+              <aside className="solo-side">
+                <div className="room-block">
+                  <div className="section-label">
+                    Salon {tunnelURL && <span className="badge-online">En ligne</span>}
+                  </div>
+                  <div className="room-url-display">
+                    <span className="room-url-text">{shareURL || 'démarrage…'}</span>
+                    <button className="room-url-copy" onClick={copyURL} disabled={!shareURL} title="Copier">
+                      {copied ? <Check size={14} /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                  <div className="viewers-line">
+                    <span className={viewers > 0 ? 'dot-online' : 'dot-offline'} />
+                    {viewers === 0 ? 'En attente d\'invités' : `${viewers} invité${viewers > 1 ? 's' : ''} connecté${viewers > 1 ? 's' : ''}`}
+                  </div>
+                  {!tunnelURL && <div className="hint">Réseau local uniquement. Activez l'accès internet pour partager hors de chez vous.</div>}
+                  <button className={tunnelURL ? 'danger' : 'primary'} onClick={toggleTunnel} disabled={tunnelLoading}>
+                    <Globe size={14} strokeWidth={2} />
+                    {tunnelLoading ? 'Connexion…' : (tunnelURL ? 'Couper l\'accès internet' : 'Activer l\'accès internet')}
+                  </button>
+                  <button className="solo-stop-share" onClick={stopSharing}>Arrêter le partage</button>
+                </div>
+                <Chat socket={socketRef.current} visible={true} currentNickname={nickname} onUnreadChange={() => {}} />
+              </aside>
+            )}
+          </div>
           {!fullscreen && (
           <div className="solo-playbar">
             {!fullscreen && (
@@ -159,13 +281,13 @@ export default function Solo({ onLeave }) {
                 <span className="solo-file" title={playing.name}>{playing.name}</span>
               </div>
             )}
-            <button className="solo-mini" onClick={() => window.electronAPI.solo.seekRel(-10)} title="Reculer de 10 s">
+            <button className="solo-mini" onClick={() => skip(-10)} title="Reculer de 10 s">
               <Rewind size={15} strokeWidth={2} />
             </button>
             <button className="solo-play" onClick={() => window.electronAPI.solo.toggle()}>
               {st.paused ? <Play size={18} strokeWidth={2} fill="currentColor" /> : <Pause size={18} strokeWidth={2} fill="currentColor" />}
             </button>
-            <button className="solo-mini" onClick={() => window.electronAPI.solo.seekRel(10)} title="Avancer de 10 s">
+            <button className="solo-mini" onClick={() => skip(10)} title="Avancer de 10 s">
               <FastForward size={15} strokeWidth={2} />
             </button>
             <span className="solo-time">{fmt(pos)}</span>
