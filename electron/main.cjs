@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { startServer, getCatalog, scanFolder, getState, broadcastCatalog } = require('./server/server.cjs');
-const { getAllMedia, addEmbeddedSubsToMedia, setMediaProbeInfo } = require('./server/catalog.cjs');
+const { getAllMedia, addEmbeddedSubsToMedia, setMediaProbeInfo, getMedia } = require('./server/catalog.cjs');
 const tunnel = require('./server/tunnel.cjs');
 const metadata = require('./server/metadata.cjs');
 const subtitles = require('./server/subtitles.cjs');
@@ -374,6 +374,20 @@ ipcMain.handle('solo:region', (_e, rect) => {
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
 ipcMain.handle('solo:volume', (_e, v) => mpv.setVolume(v));
 ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));
+ipcMain.handle('solo:seek-rel', (_e, d) => mpv.seekRelative(d));
+ipcMain.handle('solo:fullscreen', () => {
+  if (!mainWindow) return false;
+  const v = !mainWindow.isFullScreen();
+  mainWindow.setFullScreen(v);
+  return v;
+});
+ipcMain.handle('solo:load-subtitle', (_e, { mediaId, subIdx } = {}) => {
+  try {
+    const sub = getMedia(mediaId)?.subs?.[subIdx];
+    if (sub?.path) { mpv.addSubtitle(sub.path); return { ok: true }; }
+    return { ok: false };
+  } catch (e) { return { error: e.message }; }
+});
 ipcMain.handle('solo:position', () => mpv.getPosition());
 ipcMain.handle('solo:stop', () => { mpv.stop(); if (mpvWin && !mpvWin.isDestroyed()) mpvWin.hide(); });
 

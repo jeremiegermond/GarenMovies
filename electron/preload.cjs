@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     toggle: () => ipcRenderer.invoke('solo:toggle'),
     volume: (v) => ipcRenderer.invoke('solo:volume', v),
     seek: (t) => ipcRenderer.invoke('solo:seek', t),
+    seekRel: (d) => ipcRenderer.invoke('solo:seek-rel', d),
+    fullscreen: () => ipcRenderer.invoke('solo:fullscreen'),
+    loadSubtitle: (mediaId, subIdx) => ipcRenderer.invoke('solo:load-subtitle', { mediaId, subIdx }),
     position: () => ipcRenderer.invoke('solo:position'),
     stop: () => ipcRenderer.invoke('solo:stop'),
     onStatus: (cb) => {

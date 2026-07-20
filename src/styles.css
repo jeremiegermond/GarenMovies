@@ -1790,7 +1790,7 @@ input:disabled { opacity: 0.5; }
   border-radius: 50%; background: var(--text); color: var(--bg-base); border: none;
 }
 .solo-play:hover { background: #fff; }
-.solo-stop {
+.solo-mini {
   width: 34px; height: 34px; padding: 0; flex-shrink: 0; border-radius: var(--r-md);
   color: var(--text-secondary);
 }
