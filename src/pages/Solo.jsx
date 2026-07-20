@@ -34,10 +34,17 @@ export default function Solo({ onLeave }) {
     const off = window.electronAPI.solo.onStatus((s) => {
       if (s.stopped) { setPlaying(null); setSt({ position: 0, duration: 0, paused: false }); return; }
       if (s.error) { setError(s.error); return; }
+      if (s.fullscreen != null) setFullscreen(s.fullscreen);
       setSt((prev) => ({ ...prev, ...s }));
     });
     return () => { off && off(); window.electronAPI.solo.stop(); };
   }, []);
+
+  // Hide the native mpv window while the subtitle dialog is open (HTML can't
+  // float over the native video surface), then bring it back.
+  useEffect(() => {
+    window.electronAPI.solo.setVisible(!showSubSearch);
+  }, [showSubSearch]);
 
   // Clear the scrub value once mpv's real position catches up to the seek target
   // (stops the slider from snapping back visually right after a seek).

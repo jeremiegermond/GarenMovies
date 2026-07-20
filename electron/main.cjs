@@ -85,6 +85,10 @@ async function createWindow() {
     }
   });
 
+  // Drive the solo player's fullscreen state from the real window events.
+  mainWindow.on('enter-full-screen', () => mainWindow?.webContents.send('solo:status', { fullscreen: true }));
+  mainWindow.on('leave-full-screen', () => mainWindow?.webContents.send('solo:status', { fullscreen: false }));
+
   if (isDev) {
     await mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -349,11 +353,13 @@ function mpvWid() {
   catch { return null; }
 }
 
+let mpvHidden = false; // intentionally hidden (e.g. while an HTML dialog is open over the video)
 ipcMain.handle('solo:open', async (_e, filePath) => {
   const win = ensureMpvWindow();
   const wid = win ? mpvWid() : null;
   try {
     await mpv.loadFile(filePath, wid);      // wid → embedded; null → mpv's own window (fallback)
+    mpvHidden = false;
     if (win) win.showInactive();
     return { ok: true, embedded: !!wid };
   } catch (e) { return { error: e.message }; }
@@ -368,8 +374,15 @@ ipcMain.handle('solo:region', (_e, rect) => {
       width: Math.max(1, Math.round(rect.width || 0)),
       height: Math.max(1, Math.round(rect.height || 0))
     });
-    if (!mpvWin.isVisible()) mpvWin.showInactive();
+    if (!mpvHidden && !mpvWin.isVisible()) mpvWin.showInactive();
   } catch {}
+});
+// Hide/show the native mpv window so HTML overlays (subtitle search, etc.) can
+// appear over the video area (mpv is a native surface — HTML can't float on it).
+ipcMain.handle('solo:set-visible', (_e, visible) => {
+  if (!mpvWin || mpvWin.isDestroyed()) return;
+  mpvHidden = !visible;
+  if (visible) mpvWin.showInactive(); else mpvWin.hide();
 });
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
 ipcMain.handle('solo:volume', (_e, v) => mpv.setVolume(v));
@@ -378,7 +391,12 @@ ipcMain.handle('solo:seek-rel', (_e, d) => mpv.seekRelative(d));
 ipcMain.handle('solo:fullscreen', () => {
   if (!mainWindow) return false;
   const v = !mainWindow.isFullScreen();
+  // Briefly hide the always-on-top mpv child so it doesn't block the parent's
+  // fullscreen transition; the region poll re-shows + repositions it after.
+  const wasVisible = mpvWin && !mpvWin.isDestroyed() && mpvWin.isVisible();
+  if (wasVisible) mpvWin.hide();
   mainWindow.setFullScreen(v);
+  if (wasVisible) setTimeout(() => { if (mpvWin && !mpvWin.isDestroyed() && !mpvHidden) mpvWin.showInactive(); }, 300);
   return v;
 });
 ipcMain.handle('solo:load-subtitle', (_e, { mediaId, subIdx } = {}) => {
