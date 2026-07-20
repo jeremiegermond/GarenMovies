@@ -87,8 +87,15 @@ async function createWindow() {
   });
 
   // Drive the solo player's fullscreen state from the real window events.
-  mainWindow.on('enter-full-screen', () => mainWindow?.webContents.send('solo:status', { fullscreen: true }));
-  mainWindow.on('leave-full-screen', () => mainWindow?.webContents.send('solo:status', { fullscreen: false }));
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('solo:status', { fullscreen: true });
+    // Flash the floating bar so the user sees the controls, then auto-hide it.
+    setTimeout(() => { if (mainWindow?.isFullScreen() && mpv.isRunning()) { showBar(); scheduleBarHide(); } }, 450);
+  });
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('solo:status', { fullscreen: false });
+    clearTimeout(barHideTimer); barPinned = false; hideBar();
+  });
 
   if (isDev) {
     await mainWindow.loadURL('http://localhost:5173');
@@ -319,10 +326,10 @@ mpv.on('property', (name, data) => {
   else if (name === 'duration' && data != null) patch.duration = data;
   else if (name === 'pause') patch.paused = !!data;
   else return;
-  mainWindow?.webContents.send('solo:status', patch);
+  sendSoloStatus(patch);
 });
-mpv.on('stopped', () => mainWindow?.webContents.send('solo:status', { stopped: true }));
-mpv.on('error', (e) => mainWindow?.webContents.send('solo:status', { error: e.message }));
+mpv.on('stopped', () => sendSoloStatus({ stopped: true }));
+mpv.on('error', (e) => sendSoloStatus({ error: e.message }));
 
 ipcMain.handle('solo:pick', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -355,22 +362,73 @@ function mpvWid() {
 }
 
 let mpvHidden = false; // intentionally hidden (e.g. while an HTML dialog is open over the video)
-// The mpv video is a native window over the web page, so the renderer never
-// sees mouse-move over the video. Poll the cursor here and notify the renderer
-// so it can show/auto-hide the controls in fullscreen.
+
+// ── Floating control bar window (fullscreen only) ──
+// HTML can't overlay the native mpv surface, so in fullscreen the solo controls
+// live in their own frameless, transparent, always-on-top window floated over
+// the bottom of the video. Shown on mouse activity, auto-hidden on idle.
+const BAR_H = 66;
+let barWin = null, barHideTimer = null, barPinned = false;
+function ensureBarWindow() {
+  if (barWin && !barWin.isDestroyed()) return barWin;
+  try {
+    barWin = new BrowserWindow({
+      parent: mainWindow, frame: false, transparent: true, backgroundColor: '#00000000',
+      show: false, resizable: false, movable: false, minimizable: false, maximizable: false,
+      skipTaskbar: true, hasShadow: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false }
+    });
+    barWin.setAlwaysOnTop(true, 'pop-up-menu');
+    barWin.on('closed', () => { barWin = null; });
+    if (isDev) barWin.loadURL('http://localhost:5173/#solobar');
+    else barWin.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { hash: 'solobar' });
+  } catch (e) { console.warn('[solo] bar window failed:', e.message); barWin = null; }
+  return barWin;
+}
+function positionBar() {
+  if (!barWin || barWin.isDestroyed() || !mpvWin || mpvWin.isDestroyed()) return;
+  const b = mpvWin.getBounds();
+  try { barWin.setBounds({ x: b.x, y: b.y + Math.max(0, b.height - BAR_H), width: b.width, height: BAR_H }); } catch {}
+}
+function showBar() {
+  const w = ensureBarWindow(); if (!w) return;
+  positionBar();
+  if (!w.isVisible()) w.showInactive();
+  try { w.setAlwaysOnTop(true, 'pop-up-menu'); w.moveTop(); } catch {}
+}
+function hideBar() { if (barWin && !barWin.isDestroyed() && barWin.isVisible()) barWin.hide(); }
+function scheduleBarHide() { clearTimeout(barHideTimer); if (!barPinned) barHideTimer = setTimeout(hideBar, 1500); }
+
+function sendSoloStatus(patch) {
+  mainWindow?.webContents.send('solo:status', patch);
+  if (barWin && !barWin.isDestroyed()) barWin.webContents.send('solo:status', patch);
+}
+
+// The mpv video is a native window over the web page, so mouse-move over the
+// video never reaches the DOM. Poll the cursor here: forward it to mpv (so
+// mpv's cursor-autohide keeps working) and, in fullscreen, reveal/auto-hide the
+// floating bar.
 let cursorWatch = null, lastCursor = null;
 function startCursorWatch() {
   if (cursorWatch) return;
   cursorWatch = setInterval(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const p = screen.getCursorScreenPoint();
-    if (!lastCursor || p.x !== lastCursor.x || p.y !== lastCursor.y) {
-      lastCursor = p;
-      mainWindow.webContents.send('solo:status', { activity: Date.now() });
+    if (lastCursor && p.x === lastCursor.x && p.y === lastCursor.y) return;
+    lastCursor = p;
+    if (mpvWin && !mpvWin.isDestroyed()) {
+      const b = mpvWin.getBounds();
+      if (p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height) {
+        mpv.mouseMove(p.x - b.x, p.y - b.y); // approximate coords — only the activity matters
+      }
     }
-  }, 250);
+    if (mainWindow.isFullScreen()) { showBar(); scheduleBarHide(); }
+  }, 200);
 }
-function stopCursorWatch() { if (cursorWatch) { clearInterval(cursorWatch); cursorWatch = null; } }
+function stopCursorWatch() {
+  if (cursorWatch) { clearInterval(cursorWatch); cursorWatch = null; }
+  clearTimeout(barHideTimer); barPinned = false; hideBar();
+}
 
 ipcMain.handle('solo:open', async (_e, filePath) => {
   const win = ensureMpvWindow();
@@ -394,7 +452,14 @@ ipcMain.handle('solo:region', (_e, rect) => {
       height: Math.max(1, Math.round(rect.height || 0))
     });
     if (!mpvHidden && !mpvWin.isVisible()) mpvWin.showInactive();
+    if (barWin && !barWin.isDestroyed() && barWin.isVisible()) positionBar();
   } catch {}
+});
+// The floating fullscreen bar reports hover so it stays up while the pointer is
+// on it (and resumes auto-hide when the pointer leaves).
+ipcMain.handle('solo:bar-keepalive', (_e, on) => {
+  barPinned = !!on;
+  if (on) { clearTimeout(barHideTimer); showBar(); } else scheduleBarHide();
 });
 // Hide/show the native mpv window so HTML overlays (subtitle search, etc.) can
 // appear over the video area (mpv is a native surface — HTML can't float on it).
@@ -411,6 +476,7 @@ ipcMain.handle('solo:seek-rel', (_e, d) => mpv.seekRelative(d));
 ipcMain.handle('solo:fullscreen', () => {
   if (!mainWindow) return false;
   const v = !mainWindow.isFullScreen();
+  clearTimeout(barHideTimer); hideBar(); // avoid a stray bar during the transition
   // Briefly hide the always-on-top mpv child so it doesn't block the parent's
   // fullscreen transition; the region poll re-shows + repositions it after.
   const wasVisible = mpvWin && !mpvWin.isDestroyed() && mpvWin.isVisible();

@@ -41,8 +41,8 @@ class MpvPlayer extends EventEmitter {
       '--no-terminal',
       '--keep-open=yes',       // don't close the window at end of file
       '--sub-auto=fuzzy',      // auto-load sidecar .srt next to the video
-      '--osc=yes',             // native floating control bar (used in fullscreen)
-      '--cursor-autohide=1000', // hide the cursor over the video after 1s
+      '--osc=no',              // no mpv OSC — the app's floating bar is the UI
+      '--cursor-autohide=1000', // hide the cursor over the video after 1s idle
       '--input-default-bindings=no',
       `--input-ipc-server=${pipe}`
     ];
@@ -60,7 +60,6 @@ class MpvPlayer extends EventEmitter {
     this._send(['observe_property', 1, 'time-pos']);
     this._send(['observe_property', 2, 'duration']);
     this._send(['observe_property', 3, 'pause']);
-    this.setOscVisible('never'); // windowed by default → app's bar drives the UI
   }
 
   _cleanup() { this.proc = null; this.sock = null; this.buf = ''; this.pending.clear(); }
@@ -125,6 +124,10 @@ class MpvPlayer extends EventEmitter {
   // Toggle mpv's native OSC (floating control bar). 'auto' = show on hover
   // (used in fullscreen), 'never' = hidden (windowed → the app's bar is the UI).
   setOscVisible(mode) { return this._send(['script-message', 'osc-visibility', mode === 'auto' ? 'auto' : 'never', 'no-osd']).catch(() => {}); }
+  // Inject a mouse-move so mpv's cursor-autohide keeps working even though the
+  // embedded window doesn't forward real mouse events. Stopping these lets the
+  // cursor (and any OSC) fade after --cursor-autohide.
+  mouseMove(x, y) { return this._send(['mouse', Math.max(0, Math.round(x)), Math.max(0, Math.round(y))]).catch(() => {}); }
   async getPosition() { try { return await this._send(['get_property', 'time-pos']); } catch { return null; } }
   stop() {
     if (!this.proc) return;

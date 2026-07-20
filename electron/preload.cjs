@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setVisible: (v) => ipcRenderer.invoke('solo:set-visible', v),
     toggle: () => ipcRenderer.invoke('solo:toggle'),
     osc: (mode) => ipcRenderer.invoke('solo:osc', mode),
+    barKeepAlive: (on) => ipcRenderer.invoke('solo:bar-keepalive', on),
     volume: (v) => ipcRenderer.invoke('solo:volume', v),
     seek: (t) => ipcRenderer.invoke('solo:seek', t),
     seekRel: (d) => ipcRenderer.invoke('solo:seek-rel', d),

@@ -92,17 +92,13 @@ export default function Solo({ onLeave }) {
     return () => { ro.disconnect(); window.removeEventListener('resize', send); clearInterval(iv); };
   }, [playing]);
 
-  // In fullscreen the app's HTML bar can't float over the native video, so we
-  // hand control to mpv's own floating OSC (shows on hover, hides itself, hides
-  // the cursor). Windowed → OSC off, the app's bar is the UI. Also re-fit mpv
-  // to the (now 100%) stage immediately on the transition.
+  // In fullscreen the app's HTML bar is hidden (a separate floating window over
+  // the video provides the controls). Re-fit mpv to the now-100% stage right
+  // away on the transition instead of waiting for the next region poll.
   useEffect(() => {
-    if (!playing) return;
-    window.electronAPI.solo.osc(fullscreen ? 'auto' : 'never');
-    if (stageRef.current) {
-      const r = stageRef.current.getBoundingClientRect();
-      window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
-    }
+    if (!playing || !stageRef.current) return;
+    const r = stageRef.current.getBoundingClientRect();
+    window.electronAPI.solo.region({ x: r.left, y: r.top, width: r.width, height: r.height });
   }, [fullscreen, playing]);
 
   // Esc exits fullscreen.

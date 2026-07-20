@@ -1806,3 +1806,16 @@ input:disabled { opacity: 0.5; }
 }
 .solo-vol-icon { color: var(--text-tertiary); flex-shrink: 0; }
 .solo-vol { width: 84px; flex: none; padding: 0; background: transparent; border: none; accent-color: var(--text); cursor: pointer; }
+
+/* Floating control bar rendered in its own frameless window over the mpv video
+   (in fullscreen). Its window is transparent, so the bar itself paints a strip. */
+html:has(.solobar-win), body:has(.solobar-win), #root:has(.solobar-win) { background: transparent !important; }
+.solobar-win {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 22px;
+  background: linear-gradient(to top, rgba(10, 11, 14, 0.97), rgba(14, 16, 21, 0.86));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.solobar-win .solo-mini { color: #cfd3da; }
+.solobar-win .solo-time { color: #aeb4bf; }
