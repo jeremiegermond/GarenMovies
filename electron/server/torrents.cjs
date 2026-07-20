@@ -145,7 +145,64 @@ async function searchNyaa(query) {
   } catch (e) { console.warn('[torrents] nyaa failed:', e.message); return []; }
 }
 
-const PROVIDERS = [searchApibay, searchYTS, searchTorrentsCsv, searchNyaa];
+// YggTorrent (French tracker) via the community yggapi.eu JSON API. The list
+// endpoint doesn't include the info-hash, so we fetch it per result from the
+// detail endpoint (capped + parallel). Best-effort: any failure → [].
+async function searchYgg(query) {
+  try {
+    const list = await fetchWith(`https://yggapi.eu/torrents?q=${encodeURIComponent(query)}&order_by=seeders&page=1`, 'json', 8000);
+    const arr = Array.isArray(list) ? list : (list?.torrents || list?.data || []);
+    if (!arr.length) return [];
+    const top = arr.slice(0, 12);
+    const resolved = await Promise.all(top.map(async (x) => {
+      try {
+        let hash = x.hash || x.info_hash || x.infohash;
+        if (!hash && x.id != null) {
+          const d = await fetchWith(`https://yggapi.eu/torrent/${x.id}`, 'json', 6000);
+          hash = d?.hash || d?.info_hash || d?.infohash;
+        }
+        if (!hash) return null;
+        const name = x.title || x.name;
+        return {
+          title: name,
+          size: humanSize(x.size || x.size_bytes),
+          sizeBytes: Number(x.size || x.size_bytes) || 0,
+          seeders: Number(x.seeders) || 0,
+          leechers: Number(x.leechers) || 0,
+          source: 'Ygg',
+          magnet: buildMagnet(hash, name)
+        };
+      } catch { return null; }
+    }));
+    return resolved.filter(Boolean);
+  } catch (e) { console.warn('[torrents] ygg failed:', e.message); return []; }
+}
+
+// AnimeTosho JSON feed — aggregates Nyaa + other anime sources, info-hash inline.
+async function searchAnimeTosho(query) {
+  try {
+    const j = await fetchWith(`https://feed.animetosho.org/json?q=${encodeURIComponent(query)}`, 'json', 8000);
+    const arr = Array.isArray(j) ? j : (j?.results || []);
+    return arr
+      .map((x) => {
+        const hash = x.info_hash || x.infohash || x.hash;
+        if (!hash) return null;
+        const name = x.title || x.torrent_name || x.torrent_url || 'torrent';
+        return {
+          title: name,
+          size: humanSize(x.total_size || x.size),
+          sizeBytes: Number(x.total_size || x.size) || 0,
+          seeders: Number(x.seeders ?? x.seed ?? 0) || 0,
+          leechers: Number(x.leechers ?? x.leech ?? 0) || 0,
+          source: 'Tosho',
+          magnet: buildMagnet(hash, name)
+        };
+      })
+      .filter(Boolean);
+  } catch (e) { console.warn('[torrents] animetosho failed:', e.message); return []; }
+}
+
+const PROVIDERS = [searchApibay, searchYTS, searchTorrentsCsv, searchNyaa, searchYgg, searchAnimeTosho];
 
 async function search(query) {
   const q = (query || '').trim();

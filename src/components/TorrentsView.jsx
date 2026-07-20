@@ -96,7 +96,7 @@ export default function TorrentsView() {
     >
       <div className="torrents-head">
         <h2>Rechercher un torrent</h2>
-        <p className="torrents-sub">Résultats agrégés depuis The Pirate Bay, YTS, Torrents-CSV et Nyaa. Le magnet s'ouvre dans ton client torrent — GarenMovies ne télécharge rien lui-même.</p>
+        <p className="torrents-sub">Résultats agrégés depuis The Pirate Bay, YTS, Torrents-CSV, Nyaa (anime), AnimeTosho et YggTorrent (FR). Le magnet s'ouvre dans ton client torrent — GarenMovies ne télécharge rien lui-même.</p>
         <div className="torrents-search">
           <Search size={16} strokeWidth={2} />
           <input

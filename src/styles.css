@@ -1638,6 +1638,8 @@ input:disabled { opacity: 0.5; }
 .src-tpb { background: rgba(108, 140, 255, 0.15); color: #8fa6ff; }
 .src-csv { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
 .src-nyaa { background: rgba(232, 121, 249, 0.15); color: #e879f9; }
+.src-ygg { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+.src-tosho { background: rgba(45, 212, 191, 0.15); color: #2dd4bf; }
 .tt-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
 .tt-open {
   display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px;
