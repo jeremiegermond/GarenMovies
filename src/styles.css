@@ -1636,6 +1636,8 @@ input:disabled { opacity: 0.5; }
 .tt-source { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
 .src-yts { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
 .src-tpb { background: rgba(108, 140, 255, 0.15); color: #8fa6ff; }
+.src-csv { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+.src-nyaa { background: rgba(232, 121, 249, 0.15); color: #e879f9; }
 .tt-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
 .tt-open {
   display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px;

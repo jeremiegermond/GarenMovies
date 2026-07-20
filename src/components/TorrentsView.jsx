@@ -96,7 +96,7 @@ export default function TorrentsView() {
     >
       <div className="torrents-head">
         <h2>Rechercher un torrent</h2>
-        <p className="torrents-sub">Résultats depuis YTS + The Pirate Bay. Le magnet s'ouvre dans ton client torrent — GarenMovies ne télécharge rien lui-même.</p>
+        <p className="torrents-sub">Résultats agrégés depuis The Pirate Bay, YTS, Torrents-CSV et Nyaa. Le magnet s'ouvre dans ton client torrent — GarenMovies ne télécharge rien lui-même.</p>
         <div className="torrents-search">
           <Search size={16} strokeWidth={2} />
           <input
@@ -128,7 +128,7 @@ export default function TorrentsView() {
                   <td className="tt-name" title={r.title}>{r.title}</td>
                   <td className="tt-size">{r.size}</td>
                   <td className="tt-seed"><span className={r.seeders > 0 ? 'seed-ok' : 'seed-none'}>{r.seeders}</span></td>
-                  <td><span className={`tt-source ${r.source === 'YTS' ? 'src-yts' : 'src-tpb'}`}>{r.source}</span></td>
+                  <td><span className={`tt-source src-${r.source.toLowerCase()}`}>{r.source}</span></td>
                   <td className="tt-actions">
                     <button className="tt-open" onClick={() => openMagnet(r.magnet)} title="Ouvrir dans le client torrent">
                       <Download size={14} strokeWidth={2} /> Ouvrir
