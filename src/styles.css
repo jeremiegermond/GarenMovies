@@ -1828,6 +1828,14 @@ input:disabled { opacity: 0.5; }
 }
 .solo-vol-icon { color: var(--text-tertiary); flex-shrink: 0; }
 .solo-vol { width: 84px; flex: none; padding: 0; background: transparent; border: none; accent-color: var(--text); cursor: pointer; }
+.solo-audio { display: flex; align-items: center; gap: 6px; flex-shrink: 1; min-width: 0; }
+.solo-audio-out {
+  max-width: 160px; min-width: 0; padding: 5px 8px; font-size: 12px;
+  color: var(--text-secondary); background: var(--bg-elevated);
+  border: 1px solid var(--border-faint); border-radius: var(--r-md); cursor: pointer;
+  text-overflow: ellipsis;
+}
+.solo-audio-out:hover { color: var(--text); border-color: var(--border); }
 
 /* Floating control bar rendered in its own frameless window over the mpv video
    (in fullscreen). Its window is transparent, so the bar itself paints a strip. */

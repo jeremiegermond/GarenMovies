@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions, Users, Globe, Copy, Check } from 'lucide-react';
+import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions, Users, Globe, Copy, Check, Speaker } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CatalogueView from '../components/CatalogueView.jsx';
 import SubtitleSearchModal from '../components/SubtitleSearchModal.jsx';
@@ -7,6 +7,7 @@ import Chat from '../components/Chat.jsx';
 
 const BAR_H = 64; // control-bar height reserved at the bottom when controls show in fullscreen
 const NICK_KEY = 'garenmovies-nickname';
+const AUDIO_KEY = 'garenmovies-solo-audio-device'; // remembered mpv output device
 
 function fmt(t) {
   if (t == null || isNaN(t)) return '0:00';
@@ -27,6 +28,8 @@ export default function Solo({ onLeave }) {
   const [st, setSt] = useState({ position: 0, duration: 0, paused: false });
   const [scrub, setScrub] = useState(null);
   const [volume, setVolume] = useState(100);
+  const [audioDevices, setAudioDevices] = useState([]);
+  const [audioDevice, setAudioDevice] = useState(() => localStorage.getItem(AUDIO_KEY) || 'auto');
   const [fullscreen, setFullscreen] = useState(false);
   const [showSubSearch, setShowSubSearch] = useState(false);
   const [uiVisible, setUiVisible] = useState(true);
@@ -208,6 +211,20 @@ export default function Solo({ onLeave }) {
     setPlaying({ id: film.id, name: film.title, meta: film.meta });
     playingRef.current = { id: film.id, name: film.title, meta: film.meta };
     if (sharedRef.current) socketRef.current?.emit('host:select', { mediaId: film.id });
+    refreshAudio();
+  }
+  // mpv restarts fresh for each film (audio-device resets to auto), so re-list
+  // the OS outputs and re-apply the remembered one after every open.
+  async function refreshAudio() {
+    try { const list = await window.electronAPI.solo.audioDevices(); setAudioDevices(Array.isArray(list) ? list : []); }
+    catch { setAudioDevices([]); }
+    const saved = localStorage.getItem(AUDIO_KEY) || 'auto';
+    if (saved !== 'auto') window.electronAPI.solo.setAudioDevice(saved);
+  }
+  function changeAudioDevice(name) {
+    setAudioDevice(name);
+    localStorage.setItem(AUDIO_KEY, name);
+    window.electronAPI.solo.setAudioDevice(name);
   }
   function backToLibrary() { if (fullscreen) toggleFullscreen(); if (sharedRef.current) stopSharing(); window.electronAPI.solo.stop(); setPlaying(null); }
   async function toggleFullscreen() { const v = await window.electronAPI.solo.fullscreen(); setFullscreen(!!v); }
@@ -301,6 +318,15 @@ export default function Solo({ onLeave }) {
             <Volume2 size={15} strokeWidth={1.75} className="solo-vol-icon" />
             <input className="solo-vol" type="range" min={0} max={130} step={1} value={volume}
               onChange={(e) => { const v = Number(e.target.value); setVolume(v); window.electronAPI.solo.volume(v); }} title="Volume" />
+            <div className="solo-audio" title="Sortie audio du film (ex. la TV)">
+              <Speaker size={15} strokeWidth={1.75} className="solo-vol-icon" />
+              <select className="solo-audio-out" value={audioDevice} onChange={(e) => changeAudioDevice(e.target.value)}>
+                {!audioDevices.some((d) => d.name === 'auto') && <option value="auto">Sortie par défaut</option>}
+                {audioDevices.map((d) => (
+                  <option key={d.name} value={d.name}>{d.name === 'auto' ? 'Sortie par défaut' : (d.description || d.name)}</option>
+                ))}
+              </select>
+            </div>
             <button className="solo-mini" onClick={() => setShowSubSearch(true)} title="Sous-titres">
               <Captions size={15} strokeWidth={2} />
             </button>
