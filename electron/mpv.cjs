@@ -60,6 +60,9 @@ class MpvPlayer extends EventEmitter {
     this._send(['observe_property', 1, 'time-pos']);
     this._send(['observe_property', 2, 'duration']);
     this._send(['observe_property', 3, 'pause']);
+    // With --keep-open the file isn't unloaded at the end (no end-file event):
+    // mpv pauses on the last frame and flips eof-reached instead.
+    this._send(['observe_property', 4, 'eof-reached']);
   }
 
   _cleanup() { this.proc = null; this.sock = null; this.buf = ''; this.pending.clear(); }

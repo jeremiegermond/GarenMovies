@@ -7,6 +7,8 @@ import Chat from '../components/Chat.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import Player from '../components/Player.jsx';
 import TorrentsView from '../components/TorrentsView.jsx';
+import NextUpOverlay from '../components/NextUpOverlay.jsx';
+import { findNextEpisode } from '../lib/episodes.js';
 
 const NICK_KEY = 'garenmovies-nickname';
 
@@ -21,6 +23,8 @@ export default function Host({ onLeave }) {
   const [folder, setFolder] = useState(null);
   const [catalog, setCatalog] = useState({ catalogue: [], stream: [] });
   const [activeId, setActiveId] = useState(null);
+  const [nextUp, setNextUp] = useState(null); // next episode offered when the current one ends
+  const [autoStartId, setAutoStartId] = useState(null); // media to start playing as soon as it loads
   const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
   const [viewers, setViewers] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -84,14 +88,27 @@ export default function Host({ onLeave }) {
     } finally { setScanning(false); }
   }
 
-  function selectMovie(m) {
+  function selectMovie(m, { auto = false } = {}) {
     setActiveId(m.id);
+    setNextUp(null);
+    setAutoStartId(auto ? m.id : null);
     socketRef.current?.emit('host:select', { mediaId: m.id });
     setTab('room');
   }
 
   function pushHostState(payload) {
+    if (payload?.paused === false) setNextUp(null); // replaying the ended episode cancels the countdown
     socketRef.current?.emit('host:state', { mediaId: activeId, ...payload });
+  }
+
+  // Episode finished → offer the next one; guests follow via host:select.
+  function onEpisodeEnded() {
+    const next = findNextEpisode(catalog, activeMedia);
+    if (next) setNextUp(next);
+  }
+  function playNextUp() {
+    if (!nextUp || nextUp.id === activeId) return; // countdown + click at the same instant
+    selectMovie(nextUp, { auto: true });
   }
 
   async function toggleTunnel() {
@@ -236,7 +253,13 @@ export default function Host({ onLeave }) {
                   mediaTitle={activeMedia?.title}
                   mediaMeta={activeMedia?.meta}
                   onOpenSettings={() => setSettingsOpen(true)}
-                />
+                  onEnded={onEpisodeEnded}
+                  autoStart={autoStartId != null && autoStartId === activeId}
+                >
+                  {nextUp && (
+                    <NextUpOverlay next={nextUp} onPlay={playNextUp} onCancel={() => setNextUp(null)} />
+                  )}
+                </Player>
               </main>
             </div>
           )}

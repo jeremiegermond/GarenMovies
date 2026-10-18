@@ -11,12 +11,13 @@ const SYNC_THRESHOLD = 1.0;
 const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
 function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, children }) {
   const videoRef = useRef(null);
   const wrapRef = useRef(null);
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
   const wasPlayingRef = useRef(false);
+  const autoStartRef = useRef(false); // start this media on load (auto-next episode), until it actually plays
   const pollTokenRef = useRef(0); // bumped on every reset/prep change to cancel stale polls
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -99,6 +100,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setSubOffset(0);
     pendingSeekRef.current = null;
     wasPlayingRef.current = false;
+    autoStartRef.current = !!autoStart;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
 
   // Reset offset when the user picks a different subtitle track
@@ -296,7 +299,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       try { v.currentTime = pendingSeekRef.current; } catch {}
       pendingSeekRef.current = null;
     }
-    if (wasPlayingRef.current) {
+    if (wasPlayingRef.current || autoStartRef.current) {
       wasPlayingRef.current = false;
       v.play().catch(() => {});
     }
@@ -565,6 +568,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           onPlay={() => !suppressRef.current && emitState({ paused: false })}
           onPause={() => !suppressRef.current && emitState({ paused: true })}
           onSeeked={() => !suppressRef.current && emitState()}
+          onPlaying={() => { autoStartRef.current = false; }}
+          onEnded={() => onEnded?.()}
         >
           {subs.map((s) => (
             <track
@@ -827,6 +832,9 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           }}
         />
       )}
+      {/* Extra overlays from the parent (e.g. the next-episode countdown) —
+          rendered inside the wrapper so they stay visible in fullscreen. */}
+      {children}
     </div>
   );
 }

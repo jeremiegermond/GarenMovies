@@ -325,6 +325,7 @@ mpv.on('property', (name, data) => {
   if (name === 'time-pos' && data != null) patch.position = data;
   else if (name === 'duration' && data != null) patch.duration = data;
   else if (name === 'pause') patch.paused = !!data;
+  else if (name === 'eof-reached') patch.eof = !!data;
   else return;
   sendSoloStatus(patch);
 });
