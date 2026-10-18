@@ -56,6 +56,12 @@ export default function UpdateModal() {
           {phase === 'downloading' && 'Téléchargement de la mise à jour…'}
           {phase === 'downloaded' && `Version ${status.version ? 'v' + status.version : ''} prête à installer`}
         </div>
+        {phase === 'downloaded' && (
+          <div className="update-hint">
+            GarenMovies se ferme quelques secondes, s'installe en arrière-plan puis se relance tout seul.
+            Si tu choisis « Plus tard », la mise à jour s'installera à la fermeture de l'app.
+          </div>
+        )}
 
         <div className="update-steps">
           {STEPS.map((label, i) => (

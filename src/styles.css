@@ -1703,6 +1703,7 @@ input:disabled { opacity: 0.5; }
   background: var(--accent-soft); border-radius: 50%; color: var(--text);
 }
 .update-title { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+.update-hint { font-size: 12.5px; line-height: 1.5; color: var(--text-tertiary); text-align: center; max-width: 340px; }
 .update-steps { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; }
 .update-step {
   display: flex; align-items: center; gap: 6px;

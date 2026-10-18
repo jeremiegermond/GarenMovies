@@ -47,8 +47,10 @@ function initAutoUpdate(getWindow) {
     return true;
   });
   ipcMain.handle('update:install', () => {
+    // Silent install (/S → no installer wizard) and relaunch the app once it's
+    // done, so updating never leaves the app from the user's point of view.
     // Let the IPC reply flush before quitting.
-    setImmediate(() => autoUpdater.quitAndInstall());
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
     return true;
   });
 
