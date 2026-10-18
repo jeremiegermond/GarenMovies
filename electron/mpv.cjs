@@ -60,6 +60,9 @@ class MpvPlayer extends EventEmitter {
     this._send(['observe_property', 1, 'time-pos']);
     this._send(['observe_property', 2, 'duration']);
     this._send(['observe_property', 3, 'pause']);
+    // With --keep-open the file isn't unloaded at the end (no end-file event):
+    // mpv pauses on the last frame and flips eof-reached instead.
+    this._send(['observe_property', 4, 'eof-reached']);
   }
 
   _cleanup() { this.proc = null; this.sock = null; this.buf = ''; this.pending.clear(); }
@@ -129,6 +132,11 @@ class MpvPlayer extends EventEmitter {
   // cursor (and any OSC) fade after --cursor-autohide.
   mouseMove(x, y) { return this._send(['mouse', Math.max(0, Math.round(x)), Math.max(0, Math.round(y))]).catch(() => {}); }
   async getPosition() { try { return await this._send(['get_property', 'time-pos']); } catch { return null; } }
+  // Audio output routing: list the OS output devices and force mpv onto a
+  // chosen one (e.g. the TV's HDMI), independent of the Windows default — so
+  // only the film's sound goes to the TV while the rest of the PC stays put.
+  async getAudioDevices() { try { return await this._send(['get_property', 'audio-device-list']) || []; } catch { return []; } }
+  setAudioDevice(name) { return this._send(['set_property', 'audio-device', name || 'auto']).catch(() => {}); }
   stop() {
     if (!this.proc) return;
     try { this._send(['quit']); } catch {}
