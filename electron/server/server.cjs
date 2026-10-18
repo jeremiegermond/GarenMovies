@@ -340,22 +340,42 @@ function startServer(port, opts = {}) {
       res.json(hls.getStatus(req.params.mediaId, parseInt(req.params.audioIdx, 10)));
     });
 
-    app.get('/api/hls/:mediaId/:audioIdx/index.m3u8', (req, res) => {
-      const pl = hls.playlistPath(req.params.mediaId, parseInt(req.params.audioIdx, 10));
-      if (!pl || !fs.existsSync(pl)) return res.status(404).end('playlist not ready');
+    // Full-length playlist built from the film's duration, so the player shows
+    // the real length from the start and can seek anywhere (segments are made
+    // on demand below). Unknown duration → ffmpeg's own growing playlist.
+    app.get('/api/hls/:mediaId/:audioIdx/index.m3u8', async (req, res) => {
+      const audioIdx = parseInt(req.params.audioIdx, 10);
+      const m = getMedia(req.params.mediaId);
+      let text = null;
+      if (m) { try { text = await hls.buildPlaylist(m, audioIdx); } catch (e) { console.warn('[hls] playlist:', e.message); } }
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-store');
+      if (text) return res.send(text);
+      const pl = hls.playlistPath(req.params.mediaId, audioIdx);
+      if (!pl || !fs.existsSync(pl)) return res.status(404).end('playlist not ready');
       fs.createReadStream(pl).pipe(res);
     });
 
-    app.get('/api/hls/:mediaId/:audioIdx/:segment', (req, res) => {
+    app.get('/api/hls/:mediaId/:audioIdx/:segment', async (req, res) => {
       const seg = req.params.segment;
       // Only allow our own segment filenames — never an arbitrary path.
-      if (!/^seg_\d{5}\.ts$/.test(seg)) return res.status(400).end('bad segment');
-      const dir = hls.hlsDir(req.params.mediaId, parseInt(req.params.audioIdx, 10));
+      const match = /^seg_(\d{5})\.ts$/.exec(seg);
+      if (!match) return res.status(400).end('bad segment');
+      const audioIdx = parseInt(req.params.audioIdx, 10);
+      const dir = hls.hlsDir(req.params.mediaId, audioIdx);
       if (!dir) return res.status(404).end('no cache');
-      const segPath = path.join(dir, seg);
-      if (!fs.existsSync(segPath)) return res.status(404).end('segment not found');
+      // hls.js drops the request when the user seeks away — stop waiting then,
+      // so a stale request never restarts the encoder somewhere useless.
+      let aborted = false;
+      res.on('close', () => { if (!res.writableFinished) aborted = true; });
+      const m = getMedia(req.params.mediaId);
+      let segPath = path.join(dir, seg);
+      if (m) {
+        try { segPath = await hls.ensureSegment(m, audioIdx, parseInt(match[1], 10), () => aborted); }
+        catch (e) { console.warn('[hls] segment:', e.message); segPath = null; }
+      }
+      if (aborted) return;
+      if (!segPath || !fs.existsSync(segPath)) return res.status(404).end('segment not found');
       res.setHeader('Content-Type', 'video/mp2t');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       fs.createReadStream(segPath).pipe(res);

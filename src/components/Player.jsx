@@ -18,6 +18,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const pendingSeekRef = useRef(null);
   const wasPlayingRef = useRef(false);
   const autoStartRef = useRef(false); // start this media on load (auto-next episode), until it actually plays
+  const syncStateRef = useRef(syncState);
+  syncStateRef.current = syncState;
   const pollTokenRef = useRef(0); // bumped on every reset/prep change to cancel stale polls
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -252,7 +254,12 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     if (!v || !hlsUrl) return;
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, startPosition: 0, maxBufferLength: 30 });
+      // Guests joining mid-film start where the host is, instead of loading the
+      // film's beginning first (segments are produced on demand — prefetching
+      // 0:00 would just pull the encoder away from the host's position).
+      const sync = syncStateRef.current;
+      const startPosition = !isHost && sync?.mediaId === mediaId ? Math.max(0, sync.currentTime || 0) : 0;
+      const hls = new Hls({ enableWorker: true, startPosition, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
       hls.attachMedia(v);
       hls.on(Hls.Events.ERROR, (_evt, data) => {

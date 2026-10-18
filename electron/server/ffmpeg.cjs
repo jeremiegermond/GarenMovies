@@ -181,10 +181,22 @@ async function probeFile(filePath) {
 
   return {
     duration: parseFloat(data.format?.duration) || 0,
+    videoDuration: streamDuration(videoStream),
     videoCodec: videoStream?.codec_name || null,
     videoProfile: videoStream?.profile || null,
     audioTracks
   };
+}
+
+// Length of one stream: MP4 has it on the stream, MKV (mkvmerge) as a
+// DURATION tag "01:52:03.456000000". 0 when unknown.
+function streamDuration(s) {
+  if (!s) return 0;
+  const d = parseFloat(s.duration);
+  if (d > 0) return d;
+  const tag = s.tags?.DURATION || s.tags?.duration || Object.entries(s.tags || {}).find(([k]) => /^DURATION/i.test(k))?.[1];
+  const m = /^(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(tag || '');
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : 0;
 }
 
 function probeAudioTracks(filePath) {
