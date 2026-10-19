@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions, Users, Globe, Copy, Check, Speaker } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, Play, Pause, FolderOpen, Film, Library, Volume2, Rewind, FastForward, Maximize, Minimize, Captions, Users, Globe, Copy, Check, Speaker, SkipForward } from 'lucide-react';
 import { io } from 'socket.io-client';
 import CatalogueView from '../components/CatalogueView.jsx';
 import SubtitleSearchModal from '../components/SubtitleSearchModal.jsx';
 import Chat from '../components/Chat.jsx';
 import NextUpOverlay from '../components/NextUpOverlay.jsx';
-import { findNextEpisode } from '../lib/episodes.js';
+import { findNextEpisode, findPairEpisode } from '../lib/episodes.js';
+import { skipStep, autoSkipFromConfig } from '../lib/skip.js';
 
 const BAR_H = 64; // control-bar height reserved at the bottom when controls show in fullscreen
 const NICK_KEY = 'garenmovies-nickname';
@@ -35,6 +36,15 @@ export default function Solo({ onLeave }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [showSubSearch, setShowSubSearch] = useState(false);
   const [nextUp, setNextUp] = useState(null); // next episode offered at the end of the current one
+  // Intro / credits skip
+  const [markers, setMarkers] = useState(null);
+  const [autoSkip, setAutoSkip] = useState(true);
+  const [skipUi, setSkipUi] = useState(null); // 'intro' | 'credits' | null → manual button
+  const [skippedBack, setSkippedBack] = useState(null); // intro auto-skipped → "Revenir" target
+  const introDoneRef = useRef(false);
+  const creditsDoneRef = useRef(false);
+  const skipToastTimer = useRef(null);
+  const skipActionRef = useRef(() => {});
   const nextUpRef = useRef(null);
   nextUpRef.current = nextUp;
   const [uiVisible, setUiVisible] = useState(true);
@@ -75,7 +85,7 @@ export default function Solo({ onLeave }) {
   }, [fullscreen]);
 
   useEffect(() => {
-    window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); setHasOSKey(!!c?.openSubtitlesApiKey); }).catch(() => {});
+    window.electronAPI.getConfig().then((c) => { setFolder(c?.scanFolder || null); setHasApiKey(!!c?.tmdbApiKey); setHasOSKey(!!c?.openSubtitlesApiKey); setAutoSkip(autoSkipFromConfig(c)); }).catch(() => {});
     window.electronAPI.getServerInfo().then((i) => { setServerInfo(i); setStreamBase(`http://localhost:${i.port}`); }).catch(() => {});
     window.electronAPI.getCatalog().then(setCatalog).catch(() => {});
     window.electronAPI.tunnel?.status?.().then((s) => setTunnelURL(s?.url || null)).catch(() => {});
@@ -83,6 +93,7 @@ export default function Solo({ onLeave }) {
     const off = window.electronAPI.solo.onStatus((s) => {
       if (s.stopped) { setPlaying(null); setSt({ position: 0, duration: 0, paused: false }); return; }
       if (s.error) { setError(s.error); return; }
+      if (s.skipAction) { skipActionRef.current(); return; } // skip button clicked in the fullscreen bar
       if (s.fullscreen != null) setFullscreen(s.fullscreen);
       if (s.activity) pokeRef.current();
       setSt((prev) => ({ ...prev, ...s }));
@@ -156,6 +167,85 @@ export default function Solo({ onLeave }) {
     nextUpRef.current = null; // countdown + click at the same instant → only one load
     playFilm(next); // solo.open re-shows the mpv video
   }
+
+  // ── Intro / credits skip ── (markers come from the local server: chapters,
+  // audio shared with a neighbour episode, or a black end screen)
+  const currentFilm = useMemo(() => {
+    if (!playing) return null;
+    return [...(catalog.stream || []), ...(catalog.catalogue || [])].find((m) => m.id === playing.id) || null;
+  }, [playing?.id, catalog]);
+  const nextEp = useMemo(() => {
+    const n = currentFilm && findNextEpisode(catalog, currentFilm);
+    return n?.source?.path ? n : null;
+  }, [currentFilm, catalog]);
+
+  useEffect(() => {
+    setMarkers(null);
+    introDoneRef.current = false;
+    creditsDoneRef.current = false;
+    setSkipUi(null);
+    setSkippedBack(null);
+    if (!playing || !streamBase) return;
+    const pair = currentFilm && findPairEpisode(catalog, currentFilm);
+    const ctrl = new AbortController();
+    fetch(`${streamBase}/api/markers/${playing.id}${pair ? `?pair=${encodeURIComponent(pair.id)}` : ''}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => setMarkers(m))
+      .catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing?.id, streamBase]);
+
+  function showNextUp(next) {
+    setNextUp(next);
+    window.electronAPI.solo.setVisible(false); // the end card is HTML: hide the native video
+  }
+  function seekShared(t) {
+    window.electronAPI.solo.seek(t);
+    if (sharedRef.current) pushState({ currentTime: t });
+  }
+  useEffect(() => {
+    if (!playing || !markers || nextUpRef.current) return;
+    const { action, ui } = skipStep(st.position || 0, markers, {
+      introDone: introDoneRef.current, creditsDone: creditsDoneRef.current,
+      autoSkip, hasNext: !!nextEp, duration: st.duration
+    });
+    if (action === 'skipIntro') {
+      introDoneRef.current = true;
+      seekShared(markers.intro.end);
+      window.electronAPI.solo.osd('Générique passé');
+      setSkippedBack(markers.intro.start);
+      clearTimeout(skipToastTimer.current);
+      skipToastTimer.current = setTimeout(() => setSkippedBack(null), 6000);
+    } else if (action === 'credits') {
+      creditsDoneRef.current = true;
+      showNextUp(nextEp); // the credits started → next-episode countdown
+    }
+    setSkipUi((prev) => (prev === ui ? prev : ui));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.position, markers]);
+
+  function skipIntroNow() {
+    if (!markers?.intro) return;
+    introDoneRef.current = true;
+    seekShared(markers.intro.end);
+    setSkipUi(null);
+  }
+  function skipCreditsNow() {
+    creditsDoneRef.current = true;
+    setSkipUi(null);
+    if (nextEp) showNextUp(nextEp);
+    else if (st.duration) seekShared(Math.max(0, st.duration - 0.3)); // film: straight to the end
+  }
+  function undoIntroSkip() {
+    if (skippedBack != null) seekShared(skippedBack);
+    setSkippedBack(null);
+  }
+  skipActionRef.current = () => { if (skipUi === 'intro') skipIntroNow(); else if (skipUi === 'credits') skipCreditsNow(); };
+  // Mirror the offer on the floating fullscreen bar.
+  useEffect(() => {
+    window.electronAPI.solo.skipHint?.(skipUi === 'intro' ? 'intro' : skipUi === 'credits' ? (nextEp ? 'next' : 'credits') : null);
+  }, [skipUi, nextEp]);
 
   // Esc exits fullscreen.
   useEffect(() => {
@@ -367,6 +457,16 @@ export default function Solo({ onLeave }) {
                 ))}
               </select>
             </div>
+            {skippedBack != null ? (
+              <button className="solo-skip" onClick={undoIntroSkip} title="Revenir au début du générique">
+                Générique passé · Revenir
+              </button>
+            ) : skipUi ? (
+              <button className="solo-skip primary" onClick={skipUi === 'intro' ? skipIntroNow : skipCreditsNow}>
+                <SkipForward size={14} strokeWidth={2} />
+                {skipUi === 'intro' ? "Passer l'intro" : nextEp ? 'Épisode suivant' : 'Passer le générique'}
+              </button>
+            ) : null}
             <button className="solo-mini" onClick={() => setShowSubSearch(true)} title="Sous-titres">
               <Captions size={15} strokeWidth={2} />
             </button>

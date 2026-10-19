@@ -259,6 +259,7 @@ function setMediaProbeInfo(mediaId, info) {
   m.videoProfile = info.videoProfile || null;
   m.duration = info.duration || 0;
   m.videoDuration = info.videoDuration || 0;
+  m.chapters = info.chapters || [];
   if (info.audioTracks) setAudioTracksForMedia(mediaId, info.audioTracks);
 }
 

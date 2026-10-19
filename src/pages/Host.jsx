@@ -8,7 +8,8 @@ import SettingsModal from '../components/SettingsModal.jsx';
 import Player from '../components/Player.jsx';
 import TorrentsView from '../components/TorrentsView.jsx';
 import NextUpOverlay from '../components/NextUpOverlay.jsx';
-import { findNextEpisode } from '../lib/episodes.js';
+import { findNextEpisode, findPairEpisode } from '../lib/episodes.js';
+import { autoSkipFromConfig } from '../lib/skip.js';
 
 const NICK_KEY = 'garenmovies-nickname';
 
@@ -25,6 +26,8 @@ export default function Host({ onLeave }) {
   const [activeId, setActiveId] = useState(null);
   const [nextUp, setNextUp] = useState(null); // next episode offered when the current one ends
   const [autoStartId, setAutoStartId] = useState(null); // media to start playing as soon as it loads
+  const [markers, setMarkers] = useState(null); // intro / credits positions of the active film
+  const [autoSkip, setAutoSkip] = useState(true);
   const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
   const [viewers, setViewers] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -43,6 +46,7 @@ export default function Host({ onLeave }) {
     window.electronAPI.getConfig().then((c) => {
       if (c?.scanFolder) setFolder(c.scanFolder);
       setHasApiKey(!!c?.tmdbApiKey);
+      setAutoSkip(autoSkipFromConfig(c));
     });
     window.electronAPI.getCatalog().then(setCatalog);
     window.electronAPI.tunnel.status().then((s) => setTunnelURL(s.url));
@@ -131,6 +135,7 @@ export default function Host({ onLeave }) {
     setSettingsOpen(false);
     const cfg = await window.electronAPI.getConfig();
     setHasApiKey(!!cfg.tmdbApiKey);
+    setAutoSkip(autoSkipFromConfig(cfg));
   }
 
   function copyURL() {
@@ -146,6 +151,22 @@ export default function Host({ onLeave }) {
 
   const streamBase = serverInfo ? `http://localhost:${serverInfo.port}` : '';
   const streamSrc = activeId ? `${streamBase}/api/stream/${activeId}` : null;
+  const nextEpisode = activeMedia ? findNextEpisode(catalog, activeMedia) : null;
+
+  // Intro / credits positions for the film now playing (episodes are compared
+  // with a neighbour episode of the same show; the first call takes a few s).
+  useEffect(() => {
+    setMarkers(null);
+    if (!activeMedia || !streamBase) return;
+    const pair = findPairEpisode(catalog, activeMedia);
+    const ctrl = new AbortController();
+    fetch(`${streamBase}/api/markers/${activeMedia.id}${pair ? `?pair=${encodeURIComponent(pair.id)}` : ''}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => setMarkers(m))
+      .catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, streamBase]);
 
   const lanIP = serverInfo?.lanIPs?.[0];
   const lanURL = lanIP && serverInfo ? `http://${lanIP}:${serverInfo.port}` : null;
@@ -255,6 +276,10 @@ export default function Host({ onLeave }) {
                   onOpenSettings={() => setSettingsOpen(true)}
                   onEnded={onEpisodeEnded}
                   autoStart={autoStartId != null && autoStartId === activeId}
+                  markers={markers}
+                  autoSkip={autoSkip}
+                  hasNextEpisode={!!nextEpisode}
+                  onCreditsStart={onEpisodeEnded}
                 >
                   {nextUp && (
                     <NextUpOverlay next={nextUp} onPlay={playNextUp} onCancel={() => setNextUp(null)} />

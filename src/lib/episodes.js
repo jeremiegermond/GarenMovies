@@ -54,3 +54,29 @@ export function findNextEpisode(catalog, current) {
   }
   return best;
 }
+
+export function findPrevEpisode(catalog, current) {
+  const cur = episodeInfo(current);
+  if (!cur) return null;
+  const all = [...(catalog?.stream || []), ...(catalog?.catalogue || [])];
+  let best = null;
+  let bestInfo = null;
+  for (const m of all) {
+    if (!m || m.id === current.id) continue;
+    const info = episodeInfo(m);
+    if (!info || ![...info.keys].some((k) => cur.keys.has(k))) continue;
+    const before = info.season < cur.season || (info.season === cur.season && info.episode < cur.episode);
+    if (!before) continue;
+    if (!best || info.season > bestInfo.season || (info.season === bestInfo.season && info.episode > bestInfo.episode)) {
+      best = m;
+      bestInfo = info;
+    }
+  }
+  return best;
+}
+
+// Another episode of the same show to compare audio with (intro / credits
+// detection): the next one, or the previous one for the last episode.
+export function findPairEpisode(catalog, current) {
+  return findNextEpisode(catalog, current) || findPrevEpisode(catalog, current);
+}

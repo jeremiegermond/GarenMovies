@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X, Eye, EyeOff, Check, Info } from 'lucide-react';
+import { autoSkipFromConfig } from '../lib/skip.js';
 
 export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [tmdbKey, setTmdbKey] = useState('');
@@ -8,6 +9,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [originalOsKey, setOriginalOsKey] = useState('');
   const [defaultSubLang, setDefaultSubLang] = useState('fr');
   const [originalDefaultSubLang, setOriginalDefaultSubLang] = useState('fr');
+  const [autoSkip, setAutoSkip] = useState(true);
+  const [originalAutoSkip, setOriginalAutoSkip] = useState(true);
   const [nick, setNick] = useState(nickname || '');
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -22,6 +25,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
       setOriginalOsKey(cfg.openSubtitlesApiKey || '');
       setDefaultSubLang(cfg.defaultSubLang || 'fr');
       setOriginalDefaultSubLang(cfg.defaultSubLang || 'fr');
+      setAutoSkip(autoSkipFromConfig(cfg));
+      setOriginalAutoSkip(autoSkipFromConfig(cfg));
       setLoading(false);
     });
   }, []);
@@ -30,14 +35,17 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const osChanged = osKey.trim() !== originalOsKey;
   const langChanged = defaultSubLang !== originalDefaultSubLang;
   const nickChanged = nick.trim() && nick !== nickname;
-  const dirty = tmdbChanged || osChanged || langChanged || nickChanged;
+  const autoSkipChanged = autoSkip !== originalAutoSkip;
+  const dirty = tmdbChanged || osChanged || langChanged || nickChanged || autoSkipChanged;
 
   async function save() {
     await window.electronAPI.setConfig({
       tmdbApiKey: tmdbKey.trim(),
       openSubtitlesApiKey: osKey.trim(),
-      defaultSubLang
+      defaultSubLang,
+      autoSkipCredits: autoSkip
     });
+    setOriginalAutoSkip(autoSkip);
     setOriginalTmdbKey(tmdbKey.trim());
     setOriginalOsKey(osKey.trim());
     setOriginalDefaultSubLang(defaultSubLang);
@@ -139,6 +147,19 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
               <option value="ru">Русский</option>
               <option value="ja">日本語</option>
             </select>
+          </div>
+
+          <div className="field">
+            <label className="field-check">
+              <input type="checkbox" checked={autoSkip} onChange={(e) => setAutoSkip(e.target.checked)} disabled={loading} />
+              <span>
+                <b>Passer automatiquement les génériques</b>
+                <span className="field-check-help">
+                  Saute le générique d'ouverture et, sur une série, lance l'épisode suivant dès le générique de fin.
+                  Désactivé : un bouton « Passer » s'affiche à la place.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="field-help boxed">
