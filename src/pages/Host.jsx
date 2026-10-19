@@ -6,6 +6,7 @@ import CatalogueView from '../components/CatalogueView.jsx';
 import Chat from '../components/Chat.jsx';
 import SettingsModal from '../components/SettingsModal.jsx';
 import Player from '../components/Player.jsx';
+import { displayTitle } from '../lib/titles.js';
 import TorrentsView from '../components/TorrentsView.jsx';
 import NextUpOverlay from '../components/NextUpOverlay.jsx';
 import { findNextEpisode, findPairEpisode } from '../lib/episodes.js';
@@ -252,7 +253,7 @@ export default function Host({ onLeave }) {
                 {activeMedia && (
                   <div className="now-playing">
                     <div className="np-eyebrow">En lecture</div>
-                    <div className="np-title">{activeMedia.title}</div>
+                    <div className="np-title">{displayTitle(activeMedia)}</div>
                     {activeMedia.meta?.year && (
                       <div className="np-meta"><span>{activeMedia.meta.year}</span></div>
                     )}
@@ -271,7 +272,7 @@ export default function Host({ onLeave }) {
                   subActivation={subActivation}
                   streamBase={streamBase}
                   mediaId={activeId}
-                  mediaTitle={activeMedia?.title}
+                  mediaTitle={activeMedia ? displayTitle(activeMedia) : undefined}
                   mediaMeta={activeMedia?.meta}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onEnded={onEpisodeEnded}
