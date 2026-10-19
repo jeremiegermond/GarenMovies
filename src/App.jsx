@@ -5,6 +5,7 @@ import Client from './pages/Client.jsx';
 import Solo from './pages/Solo.jsx';
 import SoloBar from './pages/SoloBar.jsx';
 import UpdateModal from './components/UpdateModal.jsx';
+import WhatsNewModal from './components/WhatsNewModal.jsx';
 
 export default function App() {
   const [screen, setScreen] = useState('home');
@@ -20,6 +21,7 @@ export default function App() {
       {screen === 'client' && <Client onLeave={() => setScreen('home')} />}
       {screen === 'solo' && <Solo onLeave={() => setScreen('home')} />}
       <UpdateModal />
+      <WhatsNewModal />
     </>
   );
 }

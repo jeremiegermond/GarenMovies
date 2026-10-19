@@ -1,0 +1,104 @@
+[
+  {
+    "version": "0.12.0",
+    "date": "2026-10-20",
+    "items": [
+      "**Quoi de neuf ?** : après chaque mise à jour, une petite fenêtre résume les nouveautés, et cumule tout si tu as sauté plusieurs versions."
+    ]
+  },
+  {
+    "version": "0.11.1",
+    "date": "2026-10-19",
+    "items": [
+      "**Génériques : c'est toi qui choisis** : un bouton « Passer l'intro » ou « Épisode suivant » s'affiche pendant le générique, plus rien ne se saute sans ton clic.",
+      "Le saut automatique devient une option à activer dans les réglages (« Passer automatiquement les génériques »).",
+      "Accueil simplifié : « Regarder un film » pour regarder seul ou avec tes amis, le lecteur solo séparé disparaît."
+    ]
+  },
+  {
+    "version": "0.11.0",
+    "date": "2026-10-19",
+    "items": [
+      "**Génériques repérés automatiquement** : grâce aux chapitres du fichier ou en comparant le son des épisodes d'une série.",
+      "Sur une série, l'épisode suivant peut se lancer dès le début du générique de fin."
+    ]
+  },
+  {
+    "version": "0.10.0",
+    "date": "2026-10-18",
+    "items": [
+      "**Durée réelle dès le début** : la barre de lecture affiche tout de suite la vraie durée du film, plus besoin d'attendre le transcodage.",
+      "Saut n'importe où : on peut aller directement à n'importe quel moment du film, la lecture reprend en une seconde environ.",
+      "Un ami qui rejoint en plein film arrive directement à la bonne position, sans attendre."
+    ]
+  },
+  {
+    "version": "0.9.1",
+    "date": "2026-10-18",
+    "items": [
+      "**Mises à jour transparentes** : plus d'assistant d'installation, l'app s'installe en arrière-plan et se relance toute seule."
+    ]
+  },
+  {
+    "version": "0.9.0",
+    "date": "2026-10-18",
+    "items": [
+      "**Épisode suivant automatique** : à la fin d'un épisode, le suivant se lance tout seul après un compte à rebours de 5 s (annulable).",
+      "Choix de la sortie audio en solo : uniquement le son du film sur la TV, le reste du PC garde sa sortie habituelle.",
+      "Correctif : en solo partagé, lancer un film ne plante plus après une mise à jour de la bibliothèque."
+    ]
+  },
+  {
+    "version": "0.8.0",
+    "date": "2026-07-21",
+    "items": [
+      "**Mode solo** : lecture native instantanée de tous les formats (HEVC 10-bit inclus), sans transcodage ni salon.",
+      "Vrai plein écran : la vidéo prend tout l'écran, la barre de contrôle flotte au-dessus et le curseur se cache tout seul.",
+      "Invite tes amis en un clic depuis le solo : un salon démarre en plein film et tes potes se synchronisent sur ta lecture."
+    ]
+  },
+  {
+    "version": "0.7.0",
+    "date": "2026-07-20",
+    "items": [
+      "Importe tes sous-titres directement depuis l'app, sans passer par le dossier.",
+      "Décalage des sous-titres corrigé sur les fichiers transcodés.",
+      "Recherche de torrents beaucoup plus large, avec plusieurs sources (dont anime et contenu français).",
+      "Bouton « Actualiser » ajouté dans l'onglet Bibliothèque."
+    ]
+  },
+  {
+    "version": "0.6.1",
+    "date": "2026-07-07",
+    "items": [
+      "**Icône de l'application** : GarenMovies a enfin sa propre icône (fenêtre, raccourci, installeur)."
+    ]
+  },
+  {
+    "version": "0.6.0",
+    "date": "2026-07-06",
+    "items": [
+      "Fenêtre de mise à jour intégrée, avec les étapes et une vraie barre de progression.",
+      "Bibliothèque beaucoup plus rapide au lancement (affiches chargées en parallèle).",
+      "Écran d'accueil : cartes bien centrées, plus de texte qui déborde."
+    ]
+  },
+  {
+    "version": "0.5.0",
+    "date": "2026-07-04",
+    "items": [
+      "**Recherche de torrents intégrée** : cherche un film ou une série et envoie le lien magnet à ton client torrent en un clic.",
+      "Glisser-déposer : un magnet ou un .torrent s'ouvre dans ton client, une vidéo s'ajoute à ta bibliothèque."
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-07-04",
+    "items": [
+      "**Mises à jour intégrées** : l'app détecte les nouvelles versions et les installe en un clic.",
+      "Plein écran disponible pour les invités aussi.",
+      "Les sous-titres téléchargés par l'hôte s'activent automatiquement chez tous les invités.",
+      "Beaucoup plus d'affiches trouvées grâce à un meilleur nettoyage des noms de fichiers."
+    ]
+  }
+]

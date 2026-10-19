@@ -260,6 +260,23 @@ ipcMain.handle('server:info', () => ({
 }));
 
 ipcMain.handle('config:get', () => loadConfig());
+
+// "Quoi de neuf ?" after an update: the renderer lists the changelog entries
+// between the last version this user saw and the running one. Versions up to
+// 0.11.1 stored nothing: an existing config then means an upgrade from (at
+// least) 0.11.1; no config at all = fresh install, nothing to show.
+const WHATS_NEW_BASELINE = '0.11.1';
+ipcMain.handle('app:whats-new', () => {
+  const existed = fs.existsSync(configPath());
+  const cfg = loadConfig();
+  return { current: app.getVersion(), lastSeen: cfg.lastSeenVersion || (existed ? WHATS_NEW_BASELINE : null) };
+});
+ipcMain.handle('app:whats-new-seen', () => {
+  const cfg = loadConfig();
+  cfg.lastSeenVersion = app.getVersion();
+  saveConfig(cfg);
+  return true;
+});
 ipcMain.handle('config:set', (_e, patch) => {
   const cfg = loadConfig();
   Object.assign(cfg, patch || {});
