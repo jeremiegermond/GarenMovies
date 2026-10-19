@@ -1736,19 +1736,6 @@ input:disabled { opacity: 0.5; }
 }
 .catalogue-toolbar button { padding: 7px 14px; }
 
-/* ── Home solo link ── */
-.home-solo-link {
-  margin-top: 4px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.home-solo-link:hover { background: var(--accent-soft); color: var(--text); }
-
 /* ── Solo mode screen ── */
 .solo-app { height: 100vh; display: flex; flex-direction: column; }
 .solo-topbar {
