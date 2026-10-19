@@ -27,7 +27,7 @@ export default function Host({ onLeave }) {
   const [nextUp, setNextUp] = useState(null); // next episode offered when the current one ends
   const [autoStartId, setAutoStartId] = useState(null); // media to start playing as soon as it loads
   const [markers, setMarkers] = useState(null); // intro / credits positions of the active film
-  const [autoSkip, setAutoSkip] = useState(true);
+  const [autoSkip, setAutoSkip] = useState(false);
   const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
   const [viewers, setViewers] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -280,6 +280,7 @@ export default function Host({ onLeave }) {
                   autoSkip={autoSkip}
                   hasNextEpisode={!!nextEpisode}
                   onCreditsStart={onEpisodeEnded}
+                  onNextEpisode={() => { if (nextEpisode) selectMovie(nextEpisode, { auto: true }); }}
                 >
                   {nextUp && (
                     <NextUpOverlay next={nextUp} onPlay={playNextUp} onCancel={() => setNextUp(null)} />

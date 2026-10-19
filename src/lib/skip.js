@@ -20,5 +20,8 @@ export function skipStep(t, markers, { introDone, creditsDone, autoSkip, hasNext
   return { action: null, ui: null };
 }
 
-export const AUTO_SKIP_DEFAULT = true;
-export const autoSkipFromConfig = (cfg) => (cfg?.autoSkipCredits ?? AUTO_SKIP_DEFAULT) !== false;
+// Off by default: the viewer clicks "Passer l'intro" / "Épisode suivant".
+// (v0.11.0 used `autoSkipCredits`, on by default — saving the settings then
+// stored `true` without anyone choosing it, so that key is ignored.)
+export const AUTO_SKIP_KEY = 'autoSkip';
+export const autoSkipFromConfig = (cfg) => cfg?.[AUTO_SKIP_KEY] === true;

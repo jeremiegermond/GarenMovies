@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X, Eye, EyeOff, Check, Info } from 'lucide-react';
-import { autoSkipFromConfig } from '../lib/skip.js';
+import { autoSkipFromConfig, AUTO_SKIP_KEY } from '../lib/skip.js';
 
 export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [tmdbKey, setTmdbKey] = useState('');
@@ -9,8 +9,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [originalOsKey, setOriginalOsKey] = useState('');
   const [defaultSubLang, setDefaultSubLang] = useState('fr');
   const [originalDefaultSubLang, setOriginalDefaultSubLang] = useState('fr');
-  const [autoSkip, setAutoSkip] = useState(true);
-  const [originalAutoSkip, setOriginalAutoSkip] = useState(true);
+  const [autoSkip, setAutoSkip] = useState(false);
+  const [originalAutoSkip, setOriginalAutoSkip] = useState(false);
   const [nick, setNick] = useState(nickname || '');
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,7 +43,7 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
       tmdbApiKey: tmdbKey.trim(),
       openSubtitlesApiKey: osKey.trim(),
       defaultSubLang,
-      autoSkipCredits: autoSkip
+      [AUTO_SKIP_KEY]: autoSkip
     });
     setOriginalAutoSkip(autoSkip);
     setOriginalTmdbKey(tmdbKey.trim());
@@ -155,8 +155,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
               <span>
                 <b>Passer automatiquement les génériques</b>
                 <span className="field-check-help">
-                  Saute le générique d'ouverture et, sur une série, lance l'épisode suivant dès le générique de fin.
-                  Désactivé : un bouton « Passer » s'affiche à la place.
+                  Sinon, un bouton « Passer l'intro » ou « Épisode suivant » s'affiche pendant le générique : il suffit de cliquer.
+                  Activé : le générique d'ouverture est sauté tout seul et, sur une série, le compte à rebours vers l'épisode suivant démarre dès le générique de fin.
                 </span>
               </span>
             </label>
