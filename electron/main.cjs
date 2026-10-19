@@ -192,7 +192,8 @@ app.whenReady().then(async () => {
   } catch {}
   serverInfo = await startServer(SERVER_PORT, {
     audioCacheDir,
-    importedSubsDir: path.join(app.getPath('userData'), 'imported-subs')
+    importedSubsDir: path.join(app.getPath('userData'), 'imported-subs'),
+    markersFile: path.join(app.getPath('userData'), 'markers.json')
   });
   // Drop partial HLS segment dirs from a previous run (keep complete ones warm).
   hls.sweepPartials();
@@ -472,6 +473,11 @@ ipcMain.handle('solo:set-visible', (_e, visible) => {
 ipcMain.handle('solo:toggle', () => mpv.togglePause());
 ipcMain.handle('solo:osc', (_e, mode) => mpv.setOscVisible(mode));
 ipcMain.handle('solo:audio-devices', () => mpv.getAudioDevices());
+ipcMain.handle('solo:osd', (_e, text) => mpv.showText(text));
+// Intro/credits skip button in fullscreen: the solo page tells the floating bar
+// what to offer, and the bar's click comes back to the solo page to act on.
+ipcMain.handle('solo:skip-hint', (_e, hint) => { if (barWin && !barWin.isDestroyed()) barWin.webContents.send('solo:status', { skipHint: hint || null }); });
+ipcMain.handle('solo:skip-action', () => { mainWindow?.webContents.send('solo:status', { skipAction: Date.now() }); });
 ipcMain.handle('solo:audio-device', (_e, name) => mpv.setAudioDevice(name));
 ipcMain.handle('solo:volume', (_e, v) => mpv.setVolume(v));
 ipcMain.handle('solo:seek', (_e, t) => mpv.seekAbsolute(t));

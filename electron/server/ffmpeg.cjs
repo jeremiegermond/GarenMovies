@@ -153,6 +153,7 @@ async function probeFile(filePath) {
     '-print_format', 'json',
     '-show_format',
     '-show_streams',
+    '-show_chapters',
     filePath
   ]);
   if (r.code !== 0) {
@@ -182,6 +183,12 @@ async function probeFile(filePath) {
   return {
     duration: parseFloat(data.format?.duration) || 0,
     videoDuration: streamDuration(videoStream),
+    // Named chapters ("Opening", "Ending"…) feed the intro/credits skip.
+    chapters: (data.chapters || []).map((c) => ({
+      start: parseFloat(c.start_time) || 0,
+      end: parseFloat(c.end_time) || 0,
+      title: c.tags?.title || ''
+    })),
     videoCodec: videoStream?.codec_name || null,
     videoProfile: videoStream?.profile || null,
     audioTracks

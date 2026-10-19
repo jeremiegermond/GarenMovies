@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp, SkipForward } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
+import { skipStep } from '../lib/skip.js';
 
 const SYNC_THRESHOLD = 1.0;
 
@@ -11,7 +12,7 @@ const SYNC_THRESHOLD = 1.0;
 const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
 function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, children }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, markers = null, autoSkip = true, hasNextEpisode = false, onCreditsStart, children }) {
   const videoRef = useRef(null);
   const wrapRef = useRef(null);
   const suppressRef = useRef(false);
@@ -20,6 +21,12 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const autoStartRef = useRef(false); // start this media on load (auto-next episode), until it actually plays
   const syncStateRef = useRef(syncState);
   syncStateRef.current = syncState;
+  // Intro / credits skipping (host only — guests follow the host's seeks).
+  const introDoneRef = useRef(false);
+  const creditsDoneRef = useRef(false);
+  const skipToastTimer = useRef(null);
+  const [skipUi, setSkipUi] = useState(null); // 'intro' | 'credits' | null → manual button
+  const [skippedBack, setSkippedBack] = useState(null); // intro auto-skipped → "Revenir" target
   const pollTokenRef = useRef(0); // bumped on every reset/prep change to cancel stale polls
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -103,6 +110,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     pendingSeekRef.current = null;
     wasPlayingRef.current = false;
     autoStartRef.current = !!autoStart;
+    introDoneRef.current = false;
+    creditsDoneRef.current = false;
+    setSkipUi(null);
+    setSkippedBack(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
 
@@ -310,6 +321,49 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       wasPlayingRef.current = false;
       v.play().catch(() => {});
     }
+  }
+
+  // Skip the opening / react to the end credits as playback moves (host only;
+  // the seeks reach guests through onSeeked → emitState like any other seek).
+  function onTimeUpdate() {
+    if (!isHost || !markers) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const { action, ui } = skipStep(v.currentTime, markers, {
+      introDone: introDoneRef.current, creditsDone: creditsDoneRef.current,
+      autoSkip, hasNext: hasNextEpisode, duration: v.duration
+    });
+    if (action === 'skipIntro') {
+      introDoneRef.current = true;
+      v.currentTime = markers.intro.end;
+      setSkippedBack(markers.intro.start);
+      clearTimeout(skipToastTimer.current);
+      skipToastTimer.current = setTimeout(() => setSkippedBack(null), 6000);
+    } else if (action === 'credits') {
+      creditsDoneRef.current = true;
+      onCreditsStart?.();
+    }
+    setSkipUi((prev) => (prev === ui ? prev : ui));
+  }
+  function skipIntroNow() {
+    const v = videoRef.current;
+    if (!v || !markers?.intro) return;
+    introDoneRef.current = true;
+    v.currentTime = markers.intro.end;
+    setSkipUi(null);
+  }
+  function skipCreditsNow() {
+    const v = videoRef.current;
+    if (!v) return;
+    creditsDoneRef.current = true;
+    setSkipUi(null);
+    if (hasNextEpisode) onCreditsStart?.();
+    else if (Number.isFinite(v.duration)) v.currentTime = Math.max(0, v.duration - 0.2); // film: straight to the end
+  }
+  function undoIntroSkip() {
+    const v = videoRef.current;
+    if (v && skippedBack != null) v.currentTime = skippedBack;
+    setSkippedBack(null);
   }
 
   function emitState(extra = {}) {
@@ -576,6 +630,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           onPause={() => !suppressRef.current && emitState({ paused: true })}
           onSeeked={() => !suppressRef.current && emitState()}
           onPlaying={() => { autoStartRef.current = false; }}
+          onTimeUpdate={onTimeUpdate}
           onEnded={() => onEnded?.()}
         >
           {subs.map((s) => (
@@ -839,6 +894,25 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           }}
         />
       )}
+      {isHost && (skippedBack != null || skipUi) && (
+        <div className="skip-ui">
+          {skippedBack != null ? (
+            <div className="skip-chip">
+              Générique passé
+              <button onClick={undoIntroSkip}>Revenir</button>
+            </div>
+          ) : skipUi === 'intro' ? (
+            <button className="skip-btn" onClick={skipIntroNow}>
+              <SkipForward size={15} strokeWidth={2} /> Passer l'intro
+            </button>
+          ) : (
+            <button className="skip-btn" onClick={skipCreditsNow}>
+              <SkipForward size={15} strokeWidth={2} /> {hasNextEpisode ? 'Épisode suivant' : 'Passer le générique'}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Extra overlays from the parent (e.g. the next-episode countdown) —
           rendered inside the wrapper so they stay visible in fullscreen. */}
       {children}

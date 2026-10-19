@@ -1882,3 +1882,25 @@ html:has(.solobar-win), body:has(.solobar-win), #root:has(.solobar-win) { backgr
 .nextup-actions { display: flex; gap: 8px; margin-top: 6px; }
 .nextup-actions button { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 @keyframes nextup-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ── Intro / credits skip ── */
+.skip-ui { position: absolute; right: 24px; bottom: 72px; z-index: 6; }
+.skip-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px; font-size: 14px; font-weight: 600;
+  color: #111; background: rgba(255, 255, 255, 0.92); border: none; border-radius: var(--r-md, 10px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45); cursor: pointer;
+  animation: nextup-in 0.25s var(--ease, ease-out);
+}
+.skip-btn:hover { background: #fff; }
+.skip-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 14px; font-size: 13px; color: var(--text);
+  background: rgba(16, 17, 22, 0.9); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--r-md, 10px);
+  animation: nextup-in 0.25s var(--ease, ease-out);
+}
+.skip-chip button { padding: 5px 10px; font-size: 12px; }
+.solo-skip { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 7px 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.field-check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; font-size: 13.5px; color: var(--text); }
+.field-check input { margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--text); }
+.field-check-help { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.45; color: var(--text-tertiary); }

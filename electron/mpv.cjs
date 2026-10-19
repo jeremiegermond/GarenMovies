@@ -136,6 +136,8 @@ class MpvPlayer extends EventEmitter {
   // chosen one (e.g. the TV's HDMI), independent of the Windows default — so
   // only the film's sound goes to the TV while the rest of the PC stays put.
   async getAudioDevices() { try { return await this._send(['get_property', 'audio-device-list']) || []; } catch { return []; } }
+  // Native on-screen message (drawn by mpv over the video — works in fullscreen).
+  showText(text, ms = 2500) { return this._send(['show-text', String(text), Math.round(ms)]).catch(() => {}); }
   setAudioDevice(name) { return this._send(['set_property', 'audio-device', name || 'auto']).catch(() => {}); }
   stop() {
     if (!this.proc) return;

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Volume2, Rewind, FastForward, Minimize } from 'lucide-react';
+import { Play, Pause, Volume2, Rewind, FastForward, Minimize, SkipForward } from 'lucide-react';
+
+const SKIP_LABEL = { intro: "Passer l'intro", next: 'Épisode suivant', credits: 'Passer le générique' };
 
 function fmt(t) {
   if (t == null || isNaN(t)) return '0:00';
@@ -13,10 +15,12 @@ export default function SoloBar() {
   const [st, setSt] = useState({ position: 0, duration: 0, paused: false });
   const [scrub, setScrub] = useState(null);
   const [volume, setVolume] = useState(100);
+  const [skipHint, setSkipHint] = useState(null); // 'intro' | 'next' | 'credits' — set by the solo page
   const seekTarget = useRef(null);
 
   useEffect(() => {
     const off = window.electronAPI.solo.onStatus((s) => {
+      if ('skipHint' in s) { setSkipHint(s.skipHint); return; }
       if (s.position == null && s.duration == null && s.paused == null) return;
       setSt((prev) => ({ ...prev, ...s }));
     });
@@ -65,6 +69,11 @@ export default function SoloBar() {
       <Volume2 size={15} strokeWidth={1.75} className="solo-vol-icon" />
       <input className="solo-vol" type="range" min={0} max={130} step={1} value={volume}
         onChange={(e) => { const v = Number(e.target.value); setVolume(v); window.electronAPI.solo.volume(v); }} title="Volume" />
+      {skipHint && (
+        <button className="solo-skip primary" onClick={() => window.electronAPI.solo.skipAction()}>
+          <SkipForward size={14} strokeWidth={2} /> {SKIP_LABEL[skipHint]}
+        </button>
+      )}
       <button className="solo-mini" onClick={() => window.electronAPI.solo.fullscreen()} title="Quitter le plein écran">
         <Minimize size={15} strokeWidth={2} />
       </button>

@@ -10,6 +10,7 @@ const subtitleDownloader = require('./subtitle-downloader.cjs');
 const ffmpeg = require('./ffmpeg.cjs');
 const vlc = require('./vlc.cjs');
 const hls = require('./hls.cjs');
+const markers = require('./markers.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
 
 // Patterns that indicate ffmpeg couldn't even parse the input container —
@@ -226,6 +227,7 @@ function startServer(port, opts = {}) {
     hls.setCacheDir(audioCacheDir);
   }
   importedSubsDir = opts.importedSubsDir || null;
+  if (opts.markersFile) markers.setCacheFile(opts.markersFile);
   if (importedSubsDir) { try { fs.mkdirSync(importedSubsDir, { recursive: true }); } catch {} }
 
   return new Promise((resolve, reject) => {
@@ -379,6 +381,20 @@ function startServer(port, opts = {}) {
       res.setHeader('Content-Type', 'video/mp2t');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       fs.createReadStream(segPath).pipe(res);
+    });
+
+    // Intro / end-credits positions (chapters, audio shared with `pair` — another
+    // episode of the same show — or a black end screen). Cached; first call for
+    // an episode takes a few seconds.
+    app.get('/api/markers/:mediaId', async (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      const pair = req.query.pair ? getMedia(String(req.query.pair)) : null;
+      try {
+        res.json(await markers.getMarkers(m, pair && pair.id !== m.id ? pair : null));
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
     });
 
     app.get('/api/subs/providers', (_req, res) => {
