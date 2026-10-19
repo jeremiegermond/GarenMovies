@@ -38,7 +38,7 @@ export default function Solo({ onLeave }) {
   const [nextUp, setNextUp] = useState(null); // next episode offered at the end of the current one
   // Intro / credits skip
   const [markers, setMarkers] = useState(null);
-  const [autoSkip, setAutoSkip] = useState(true);
+  const [autoSkip, setAutoSkip] = useState(false);
   const [skipUi, setSkipUi] = useState(null); // 'intro' | 'credits' | null → manual button
   const [skippedBack, setSkippedBack] = useState(null); // intro auto-skipped → "Revenir" target
   const introDoneRef = useRef(false);
@@ -234,7 +234,7 @@ export default function Solo({ onLeave }) {
   function skipCreditsNow() {
     creditsDoneRef.current = true;
     setSkipUi(null);
-    if (nextEp) showNextUp(nextEp);
+    if (nextEp) playFilm(nextEp); // the viewer clicked "Épisode suivant": go now, no countdown
     else if (st.duration) seekShared(Math.max(0, st.duration - 0.3)); // film: straight to the end
   }
   function undoIntroSkip() {

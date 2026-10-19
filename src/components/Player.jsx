@@ -12,7 +12,7 @@ const SYNC_THRESHOLD = 1.0;
 const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
 function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, markers = null, autoSkip = true, hasNextEpisode = false, onCreditsStart, children }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, markers = null, autoSkip = false, hasNextEpisode = false, onCreditsStart, onNextEpisode, children }) {
   const videoRef = useRef(null);
   const wrapRef = useRef(null);
   const suppressRef = useRef(false);
@@ -357,7 +357,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     if (!v) return;
     creditsDoneRef.current = true;
     setSkipUi(null);
-    if (hasNextEpisode) onCreditsStart?.();
+    // The viewer clicked "Épisode suivant": go now (no countdown on top of a click).
+    if (hasNextEpisode) (onNextEpisode || onCreditsStart)?.();
     else if (Number.isFinite(v.duration)) v.currentTime = Math.max(0, v.duration - 0.2); // film: straight to the end
   }
   function undoIntroSkip() {
