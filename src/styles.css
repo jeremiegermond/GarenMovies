@@ -1921,3 +1921,70 @@ html:has(.solobar-win), body:has(.solobar-win), #root:has(.solobar-win) { backgr
 .whatsnew-version li b { color: var(--text); font-weight: 600; }
 .whatsnew-ok { align-self: flex-end; padding: 7px 18px; }
 .whatsnew-link { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+
+/* ── Player's own control bar (seek-bar previews, intro/credits zones) ── */
+.player-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 34px 18px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.35) 60%, transparent);
+  transition: opacity 0.25s var(--ease, ease-out);
+}
+.player-overlay { transition: opacity 0.25s var(--ease, ease-out); }
+.player-wrap.player-idle { cursor: none; }
+.player-wrap.player-idle .player-bar,
+.player-wrap.player-idle .player-overlay { opacity: 0; pointer-events: none; }
+/* keep subtitles clear of the bar while it's shown */
+.player-wrap.has-bar video::-webkit-media-text-track-container { transition: transform 0.25s var(--ease, ease-out); }
+.player-wrap.has-bar:not(.player-idle) video::-webkit-media-text-track-container { transform: translateY(-74px); }
+/* the skip button and the next-episode card sit above the bar */
+.player-wrap.has-bar .skip-ui,
+.player-wrap.has-bar .nextup-corner { bottom: 100px; }
+
+.pb-seek { position: relative; height: 18px; display: flex; align-items: center; touch-action: none; }
+.pb-seek.interactive { cursor: pointer; }
+.pb-track {
+  position: relative; width: 100%; height: 4px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22); transition: height 0.12s;
+}
+.pb-seek.interactive:hover .pb-track { height: 6px; }
+.pb-buffered, .pb-played, .pb-zone { position: absolute; top: 0; bottom: 0; left: 0; border-radius: inherit; }
+.pb-buffered { background: rgba(255, 255, 255, 0.32); }
+.pb-played { background: #fff; z-index: 1; }
+.pb-zone { z-index: 2; background: rgba(250, 204, 21, 0.6); border-radius: 0; }
+.pb-hoverline { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(255, 255, 255, 0.7); z-index: 3; }
+.pb-knob {
+  position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; z-index: 4;
+  background: #fff; transform: translate(-50%, -50%) scale(0); transition: transform 0.12s;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); pointer-events: none;
+}
+.pb-seek.interactive:hover .pb-knob { transform: translate(-50%, -50%) scale(1); }
+.pb-preview {
+  position: absolute; bottom: 22px; transform: translateX(-50%); z-index: 6;
+  display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none;
+}
+.pb-preview-img {
+  background-repeat: no-repeat; border-radius: 6px; border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); background-color: #000;
+}
+.pb-preview-time {
+  display: flex; flex-direction: column; align-items: center;
+  font-size: 12.5px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums;
+  background: rgba(0, 0, 0, 0.78); padding: 3px 9px; border-radius: 5px; white-space: nowrap;
+}
+.pb-preview-time span { font-size: 11px; font-weight: 500; color: rgb(250, 204, 21); }
+.pb-row { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+.pb-btn {
+  width: 34px; height: 34px; padding: 0; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: transparent; border: none; border-radius: var(--r-md, 8px); cursor: pointer;
+}
+.pb-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.pb-volume { display: flex; align-items: center; gap: 2px; margin-left: 4px; }
+.pb-volume input { width: 84px; padding: 0; background: transparent; border: none; accent-color: #fff; cursor: pointer; }
+.pb-time { margin-left: 10px; font-size: 12.5px; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pb-time span { color: rgba(255, 255, 255, 0.6); }
+/* preview box: always framed; an on-demand picture fades in when it arrives */
+.pb-preview-img { position: relative; overflow: hidden; background-color: #111; }
+.pb-preview-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.12s; }
+.pb-preview-img img.loaded { opacity: 1; }
+.pb-fullscreen { margin-left: auto; }

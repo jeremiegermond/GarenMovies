@@ -11,6 +11,7 @@ const ffmpeg = require('./ffmpeg.cjs');
 const vlc = require('./vlc.cjs');
 const hls = require('./hls.cjs');
 const markers = require('./markers.cjs');
+const trickplay = require('./trickplay.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
 
 // Patterns that indicate ffmpeg couldn't even parse the input container —
@@ -229,6 +230,7 @@ function startServer(port, opts = {}) {
   }
   importedSubsDir = opts.importedSubsDir || null;
   if (opts.markersFile) markers.setCacheFile(opts.markersFile);
+  if (opts.trickplayDir) trickplay.setCacheDir(opts.trickplayDir);
   if (importedSubsDir) { try { fs.mkdirSync(importedSubsDir, { recursive: true }); } catch {} }
 
   return new Promise((resolve, reject) => {
@@ -396,6 +398,45 @@ function startServer(port, opts = {}) {
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
+    });
+
+    // Seek-bar preview thumbnails: the first call starts generating them in the
+    // background and every call reports how many sheets are ready.
+    app.get('/api/trickplay/:mediaId', async (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      if (!m) return res.status(404).json({ error: 'Unknown media' });
+      try {
+        const v = await trickplay.ensure(m);
+        res.setHeader('Cache-Control', 'no-store');
+        res.json(v || { sheets: 0, done: true });
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+
+    // A single preview picture at slot × 10s, for times the sheets don't cover yet.
+    app.get('/api/trickplay/:mediaId/frame/:slot.jpg', async (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      const slot = /^\d{1,5}$/.test(req.params.slot) ? parseInt(req.params.slot, 10) : -1;
+      if (!m || slot < 0) return res.status(404).end('no frame');
+      let aborted = false;
+      res.on('close', () => { if (!res.writableFinished) aborted = true; });
+      const file = await trickplay.frame(m, slot, () => aborted).catch(() => null);
+      if (aborted) return;
+      if (!file) return res.status(404).end('no frame');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(file).pipe(res);
+    });
+
+    app.get('/api/trickplay/:mediaId/:n.jpg', (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      const n = /^\d{1,3}$/.test(req.params.n) ? parseInt(req.params.n, 10) : 0;
+      const file = m && n ? trickplay.sheetPath(m, n) : null;
+      if (!file) return res.status(404).end('no sheet');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(file).pipe(res);
     });
 
     app.get('/api/subs/providers', (_req, res) => {

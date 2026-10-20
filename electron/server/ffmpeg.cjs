@@ -183,6 +183,8 @@ async function probeFile(filePath) {
   return {
     duration: parseFloat(data.format?.duration) || 0,
     videoDuration: streamDuration(videoStream),
+    videoWidth: videoStream?.width || 0,
+    videoHeight: videoStream?.height || 0,
     // Named chapters ("Opening", "Ending"…) feed the intro/credits skip.
     chapters: (data.chapters || []).map((c) => ({
       start: parseFloat(c.start_time) || 0,
