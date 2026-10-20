@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Play, X } from 'lucide-react';
 import { episodeInfo } from '../lib/episodes.js';
+import { displayTitle } from '../lib/titles.js';
 
 // "Next episode in 5s" card shown when an episode ends. Counts down and calls
 // onPlay at zero; the viewer can start it right away or cancel.
@@ -29,7 +30,7 @@ export default function NextUpOverlay({ next, seconds = 5, onPlay, onCancel, var
 
   if (!next) return null;
   const info = episodeInfo(next);
-  const show = next.meta?.showName || info?.showName || next.title;
+  const show = next.meta?.showName || info?.showName || displayTitle(next);
   const epLabel = info ? `Saison ${info.season} · Épisode ${info.episode}` : null;
   const epTitle = next.meta?.episodeTitle;
   const poster = next.meta?.poster;

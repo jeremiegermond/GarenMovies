@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { X, Eye, EyeOff, Check, Info } from 'lucide-react';
+import { X, Eye, EyeOff, Check, Info, Sparkles } from 'lucide-react';
+import { SHOW_CHANGELOG_EVENT } from '../lib/changelog.js';
 import { autoSkipFromConfig, AUTO_SKIP_KEY } from '../lib/skip.js';
 
 export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
@@ -170,6 +171,9 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
           </div>
         </div>
         <div className="modal-footer">
+          <button className="ghost whatsnew-link" onClick={() => { onClose(); window.dispatchEvent(new Event(SHOW_CHANGELOG_EVENT)); }}>
+            <Sparkles size={14} strokeWidth={2} /> Nouveautés
+          </button>
           {saved && (
             <span className="saved-indicator">
               <Check size={14} strokeWidth={2.5} />

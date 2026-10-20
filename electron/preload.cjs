@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getServerInfo: () => ipcRenderer.invoke('server:info'),
   getConfig: () => ipcRenderer.invoke('config:get'),
+  whatsNew: {
+    info: () => ipcRenderer.invoke('app:whats-new'),
+    seen: () => ipcRenderer.invoke('app:whats-new-seen')
+  },
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
   pickFolder: () => ipcRenderer.invoke('dialog:pick-folder'),
   pickSubtitle: () => ipcRenderer.invoke('subs:pick'),

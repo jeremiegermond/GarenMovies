@@ -1,21 +1,23 @@
 import { useState } from 'react';
 import { Film, Play, X, Layers, RefreshCw, Folder } from 'lucide-react';
+import { displayTitle, byTitle } from '../lib/titles.js';
 
 function MovieCard({ movie, active, onClick, canSelect }) {
   const poster = movie.meta?.poster;
   const year = movie.meta?.year;
   const hasSubs = movie.subs?.length > 0;
+  const name = displayTitle(movie);
   return (
     <button
       type="button"
       className={`card ${active ? 'active' : ''} ${canSelect ? 'clickable' : ''}`}
       onClick={canSelect ? onClick : undefined}
-      title={movie.title}
+      title={name}
       disabled={!canSelect}
     >
       <div className="card-poster">
         {poster ? (
-          <img src={poster} alt={movie.title} loading="lazy" decoding="async" />
+          <img src={poster} alt={name} loading="lazy" decoding="async" />
         ) : (
           <div className="card-placeholder">
             <Film size={36} strokeWidth={1.25} />
@@ -30,7 +32,7 @@ function MovieCard({ movie, active, onClick, canSelect }) {
         )}
       </div>
       <div className="card-info">
-        <div className="card-title">{movie.title}</div>
+        <div className="card-title">{name}</div>
         {year && <div className="card-year">{year}</div>}
       </div>
     </button>
@@ -178,6 +180,10 @@ function groupItems(items) {
       g.episodes.sort((a, b) => (a.meta?.episode || 0) - (b.meta?.episode || 0));
     }
   }
+  // Alphabetical on what's shown (the server sorts on raw file names, which put
+  // "[DKB] Inu-Oh" first); seasons of a show stay in order.
+  const label = (g) => (g.type === 'tv-season' ? g.showName : displayTitle(g.item));
+  groups.sort((a, b) => byTitle(label(a), label(b)) || (a.season || 0) - (b.season || 0));
   return groups;
 }
 

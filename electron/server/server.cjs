@@ -78,6 +78,7 @@ function stripMedia(m) {
     })),
     videoCodec: m.videoCodec || null,
     meta: m.meta && !m.meta.notFound ? {
+      title: m.meta.title, // official TMDB title — guests display it instead of the file name
       poster: m.meta.poster,
       year: m.meta.year,
       overview: m.meta.overview,
