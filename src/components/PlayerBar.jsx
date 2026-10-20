@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Rewind, FastForward, Volume2, Volume1, VolumeX } from 'lucide-react';
+import { Play, Pause, Rewind, FastForward, Volume2, Volume1, VolumeX, Maximize, Minimize } from 'lucide-react';
 
 const VOLUME_KEY = 'garenmovies-volume';
 const PREVIEW_W = 192; // px width of the hover thumbnail
@@ -15,7 +15,7 @@ function fmt(t) {
 // bar can show Netflix-style hover previews and the intro / credits zones).
 // The host controls playback; guests follow the host, so for them the bar only
 // shows progress and offers their own volume.
-export default function PlayerBar({ video, isHost, markers, trickplay, trickBase }) {
+export default function PlayerBar({ video, isHost, markers, trickplay, trickBase, isFullscreen, onToggleFullscreen }) {
   const [t, setT] = useState(0);
   const [dur, setDur] = useState(0);
   const [paused, setPaused] = useState(true);
@@ -27,6 +27,8 @@ export default function PlayerBar({ video, isHost, markers, trickplay, trickBase
   const [muted, setMuted] = useState(false);
   const [hover, setHover] = useState(null); // { x, t } over the seek bar
   const [drag, setDrag] = useState(null);   // time being scrubbed to (host)
+  const [frameSlot, setFrameSlot] = useState(null); // on-demand picture while the sheets aren't there yet
+  const [frameLoaded, setFrameLoaded] = useState(false);
   const trackRef = useRef(null);
 
   // Mirror the <video> element's state.
@@ -96,32 +98,44 @@ export default function PlayerBar({ video, isHost, markers, trickplay, trickBase
   }
   function toggleMute() { if (video) video.muted = !video.muted; }
 
-  // Hover preview: which thumbnail of which sheet covers the hovered time.
+  // Hover preview: the thumbnail from a ready sheet, else a single picture
+  // fetched on demand (debounced) — so there's an image from the first hover,
+  // even before the sheets are generated.
+  const tp = trickplay;
+  const hoverT = hover && isHost ? (drag ?? hover.t) : null;
+  const slot = hoverT != null ? Math.floor(hoverT / (tp?.interval || 10)) : null;
+  const perSheet = tp ? tp.cols * tp.rows : 0;
+  const sheetReady = slot != null && tp?.sheets > 0 && Math.floor(slot / perSheet) < tp.sheets;
+  useEffect(() => {
+    if (slot == null || sheetReady || !trickBase) return;
+    const id = setTimeout(() => { setFrameLoaded(false); setFrameSlot(slot); }, 80);
+    return () => clearTimeout(id);
+  }, [slot, sheetReady, trickBase]);
+
   let preview = null;
-  if (hover && isHost) {
-    const shownT = drag ?? hover.t;
-    let img = null;
-    const tp = trickplay;
-    if (tp?.sheets && tp.thumbW) {
-      const k = Math.floor(shownT / tp.interval);
-      const per = tp.cols * tp.rows;
-      const sheet = Math.floor(k / per);
-      if (sheet < tp.sheets) {
-        const pos = k % per, col = pos % tp.cols, row = Math.floor(pos / tp.cols);
-        const s = PREVIEW_W / tp.thumbW;
-        img = {
-          width: PREVIEW_W, height: Math.round(tp.thumbH * s),
-          backgroundImage: `url(${trickBase}/${sheet + 1}.jpg)`,
-          backgroundSize: `${tp.cols * tp.thumbW * s}px ${tp.rows * tp.thumbH * s}px`,
-          backgroundPosition: `-${col * tp.thumbW * s}px -${row * tp.thumbH * s}px`
-        };
-      }
+  if (hoverT != null) {
+    const ratio = tp?.thumbW ? tp.thumbH / tp.thumbW : 9 / 16;
+    const box = { width: PREVIEW_W, height: Math.round(PREVIEW_W * ratio) };
+    let sprite = null;
+    if (sheetReady) {
+      const sheet = Math.floor(slot / perSheet);
+      const pos = slot % perSheet, col = pos % tp.cols, row = Math.floor(pos / tp.cols);
+      const k = PREVIEW_W / tp.thumbW;
+      sprite = {
+        backgroundImage: `url(${trickBase}/${sheet + 1}.jpg)`,
+        backgroundSize: `${tp.cols * tp.thumbW * k}px ${tp.rows * tp.thumbH * k}px`,
+        backgroundPosition: `-${col * tp.thumbW * k}px -${row * tp.thumbH * k}px`
+      };
     }
-    const inIntro = markers?.intro && shownT >= markers.intro.start && shownT < markers.intro.end;
-    const inCredits = markers?.credits && shownT >= markers.credits.start;
-    const half = (img ? PREVIEW_W : 60) / 2;
+    const inIntro = markers?.intro && hoverT >= markers.intro.start && hoverT < markers.intro.end;
+    const inCredits = markers?.credits && hoverT >= markers.credits.start;
+    const half = PREVIEW_W / 2;
     const x = Math.min(Math.max(hover.x, half), hover.width - half);
-    preview = { img, x, time: fmt(shownT), label: inIntro ? 'Générique' : inCredits ? 'Générique de fin' : null };
+    preview = {
+      box, sprite, x, time: fmt(hoverT),
+      frameUrl: !sheetReady && trickBase && frameSlot != null ? `${trickBase}/frame/${frameSlot}.jpg` : null,
+      label: inIntro ? 'Générique' : inCredits ? 'Générique de fin' : null
+    };
   }
 
   const shown = drag ?? t;
@@ -151,7 +165,12 @@ export default function PlayerBar({ video, isHost, markers, trickplay, trickBase
         <div className="pb-knob" style={{ left: pct(shown) }} />
         {preview && (
           <div className="pb-preview" style={{ left: preview.x }}>
-            {preview.img && <div className="pb-preview-img" style={preview.img} />}
+            <div className="pb-preview-img" style={{ ...preview.box, ...(preview.sprite || {}) }}>
+              {!preview.sprite && preview.frameUrl && (
+                <img src={preview.frameUrl} alt="" className={frameLoaded ? 'loaded' : ''}
+                  onLoad={() => setFrameLoaded(true)} onError={() => setFrameLoaded(false)} />
+              )}
+            </div>
             <div className="pb-preview-time">
               {preview.time}
               {preview.label && <span>{preview.label}</span>}
@@ -179,6 +198,11 @@ export default function PlayerBar({ video, isHost, markers, trickplay, trickBase
           />
         </div>
         <span className="pb-time">{fmt(shown)} <span>/ {fmt(dur)}</span></span>
+        {onToggleFullscreen && (
+          <button className="pb-btn pb-fullscreen" onClick={onToggleFullscreen} title={isFullscreen ? 'Quitter le plein écran (f)' : 'Plein écran (f)'}>
+            {isFullscreen ? <Minimize size={17} strokeWidth={2} /> : <Maximize size={17} strokeWidth={2} />}
+          </button>
+        )}
       </div>
     </div>
   );

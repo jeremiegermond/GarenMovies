@@ -414,6 +414,21 @@ function startServer(port, opts = {}) {
       }
     });
 
+    // A single preview picture at slot × 10s, for times the sheets don't cover yet.
+    app.get('/api/trickplay/:mediaId/frame/:slot.jpg', async (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      const slot = /^\d{1,5}$/.test(req.params.slot) ? parseInt(req.params.slot, 10) : -1;
+      if (!m || slot < 0) return res.status(404).end('no frame');
+      let aborted = false;
+      res.on('close', () => { if (!res.writableFinished) aborted = true; });
+      const file = await trickplay.frame(m, slot, () => aborted).catch(() => null);
+      if (aborted) return;
+      if (!file) return res.status(404).end('no frame');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(file).pipe(res);
+    });
+
     app.get('/api/trickplay/:mediaId/:n.jpg', (req, res) => {
       const m = getMedia(req.params.mediaId);
       const n = /^\d{1,3}$/.test(req.params.n) ? parseInt(req.params.n, 10) : 0;

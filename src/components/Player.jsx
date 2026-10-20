@@ -130,9 +130,9 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
 
-  // Seek-bar previews (host): start generating once playback has begun — not
-  // before, so it never competes with getting the first frame on screen — then
-  // poll until every sheet is ready.
+  // Seek-bar previews (host): start generating the sheets as soon as the video
+  // has loaded (the first segment is on screen, playing or not), then poll until
+  // every sheet is ready. Until then the bar fetches single pictures on demand.
   useEffect(() => {
     if (!isHost || !playedOnce || !mediaId || !streamBase) return;
     let stop = false, timer = null;
@@ -373,6 +373,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   function onLoadedMetadata() {
     const v = videoRef.current;
     if (!v) return;
+    setPlayedOnce(true); // video ready → start the seek-bar preview sheets
     if (pendingSeekRef.current != null) {
       try { v.currentTime = pendingSeekRef.current; } catch {}
       pendingSeekRef.current = null;
@@ -730,6 +731,8 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           markers={isHost ? markers : null}
           trickplay={isHost ? trickplay : null}
           trickBase={streamBase && mediaId ? `${streamBase}/api/trickplay/${mediaId}` : null}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
         />
       )}
 
@@ -943,17 +946,20 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
           )}
         </div>
 
-        <div className="overlay-control">
-          <button
-            className="overlay-toggle overlay-toggle-icon"
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
-          >
-            {isFullscreen
-              ? <Minimize size={16} strokeWidth={2} />
-              : <Maximize size={16} strokeWidth={2} />}
-          </button>
-        </div>
+        {/* fullscreen lives in the control bar now (PlayerBar), bottom-right */}
+        {!hasVideo && (
+          <div className="overlay-control">
+            <button
+              className="overlay-toggle overlay-toggle-icon"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+            >
+              {isFullscreen
+                ? <Minimize size={16} strokeWidth={2} />
+                : <Maximize size={16} strokeWidth={2} />}
+            </button>
+          </div>
+        )}
       </div>
 
       {showSubSearch && (

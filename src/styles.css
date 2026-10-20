@@ -1983,3 +1983,8 @@ html:has(.solobar-win), body:has(.solobar-win), #root:has(.solobar-win) { backgr
 .pb-volume input { width: 84px; padding: 0; background: transparent; border: none; accent-color: #fff; cursor: pointer; }
 .pb-time { margin-left: 10px; font-size: 12.5px; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pb-time span { color: rgba(255, 255, 255, 0.6); }
+/* preview box: always framed; an on-demand picture fades in when it arrives */
+.pb-preview-img { position: relative; overflow: hidden; background-color: #111; }
+.pb-preview-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.12s; }
+.pb-preview-img img.loaded { opacity: 1; }
+.pb-fullscreen { margin-left: auto; }

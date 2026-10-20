@@ -63,8 +63,10 @@ async function ensure(m) {
   const info = await ffmpeg.probeFile(m.source.path).catch(() => null);
   const w = info?.videoWidth || 16, h = info?.videoHeight || 9;
   const thumbH = Math.max(2, Math.round((THUMB_W * h) / w / 2) * 2);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  // Restart the sheets from scratch (a partial set from a killed run can't be
+  // resumed) but keep on-demand frames already extracted.
   fs.mkdirSync(dir, { recursive: true });
+  for (const n of fs.readdirSync(dir)) if (/^sheet_\d{3}\.jpg$/.test(n)) { try { fs.unlinkSync(path.join(dir, n)); } catch {} }
   const fresh = { interval: INTERVAL, cols: COLS, rows: ROWS, thumbW: THUMB_W, thumbH, done: false };
   writeIndex(dir, fresh);
 
@@ -99,9 +101,44 @@ function sheetPath(m, n) {
   return fs.existsSync(file) ? file : null;
 }
 
+// One thumbnail on demand (slot = time / INTERVAL) for the parts of the film the
+// sheets don't cover yet — e.g. hovering the seek bar before the sheets are
+// done. Nearest keyframe before that time (same picture the sheet will have),
+// ~0.4–0.8s; cached. One at a time; a request whose viewer already moved on
+// (aborted) is skipped instead of decoded.
+let frameChain = Promise.resolve();
+const frameInflight = new Map();
+function frame(m, slot, isAborted = () => false) {
+  const dir = dirFor(m);
+  if (!dir || !(slot >= 0)) return Promise.resolve(null);
+  const file = path.join(dir, `frame_${slot}.jpg`);
+  if (fs.existsSync(file)) return Promise.resolve(file);
+  const key = `${m.id}:${slot}`;
+  if (frameInflight.has(key)) return frameInflight.get(key);
+  const p = frameChain.then(() => new Promise((resolve) => {
+    if (isAborted() || fs.existsSync(file)) return resolve(fs.existsSync(file) ? file : null);
+    const bin = ffmpeg.getFfmpegPath();
+    if (!bin) return resolve(null);
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const tmp = path.join(dir, `frame_${slot}.tmp.jpg`);
+    const proc = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y',
+      '-skip_frame', 'nokey', '-ss', String(slot * INTERVAL), '-i', m.source.path,
+      '-an', '-sn', '-dn', '-frames:v', '1', '-vf', `scale=${THUMB_W}:-2`, '-q:v', '5', tmp], { windowsHide: true });
+    proc.on('error', () => resolve(null));
+    proc.on('close', () => {
+      try { if (fs.existsSync(tmp)) fs.renameSync(tmp, file); } catch {}
+      resolve(fs.existsSync(file) ? file : null);
+    });
+  }));
+  frameChain = p.catch(() => {});
+  frameInflight.set(key, p);
+  p.finally(() => frameInflight.delete(key)).catch(() => {});
+  return p;
+}
+
 function stopAll() {
   for (const [, job] of jobs) { try { job.proc?.kill(); } catch {} }
   jobs.clear();
 }
 
-module.exports = { setCacheDir, ensure, sheetPath, stopAll };
+module.exports = { setCacheDir, ensure, sheetPath, frame, stopAll };
