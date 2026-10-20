@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp, SkipForward } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
+import PlayerBar from './PlayerBar.jsx';
 import { skipStep } from '../lib/skip.js';
 
 const SYNC_THRESHOLD = 1.0;
@@ -27,6 +28,15 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const skipToastTimer = useRef(null);
   const [skipUi, setSkipUi] = useState(null); // 'intro' | 'credits' | null → manual button
   const [skippedBack, setSkippedBack] = useState(null); // intro auto-skipped → "Revenir" target
+  // Own control bar (instead of the native one): the <video> element as state so
+  // the bar can subscribe to it, auto-hide on idle, seek-bar preview thumbnails.
+  const [videoEl, setVideoEl] = useState(null);
+  const setVideoRef = useCallback((el) => { videoRef.current = el; setVideoEl(el); }, []);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [uiActive, setUiActive] = useState(true);
+  const idleTimer = useRef(null);
+  const [trickplay, setTrickplay] = useState(null);
+  const [playedOnce, setPlayedOnce] = useState(false);
   const pollTokenRef = useRef(0); // bumped on every reset/prep change to cancel stale polls
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -114,8 +124,58 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     creditsDoneRef.current = false;
     setSkipUi(null);
     setSkippedBack(null);
+    setTrickplay(null);
+    setPlayedOnce(false);
+    setIsPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
+
+  // Seek-bar previews (host): start generating once playback has begun — not
+  // before, so it never competes with getting the first frame on screen — then
+  // poll until every sheet is ready.
+  useEffect(() => {
+    if (!isHost || !playedOnce || !mediaId || !streamBase) return;
+    let stop = false, timer = null;
+    const poll = () => {
+      fetch(`${streamBase}/api/trickplay/${mediaId}`).then((r) => (r.ok ? r.json() : null)).then((tp) => {
+        if (stop || !tp) return;
+        setTrickplay(tp);
+        if (!tp.done) timer = setTimeout(poll, 3000);
+      }).catch(() => { if (!stop) timer = setTimeout(poll, 5000); });
+    };
+    poll();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [isHost, playedOnce, mediaId, streamBase]);
+
+  // Show the controls on mouse activity; hide them (and the cursor) after 2.5s
+  // while playing, unless a menu is open.
+  function pokeUi() {
+    setUiActive(true);
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setUiActive(false), 2500);
+  }
+  useEffect(() => () => clearTimeout(idleTimer.current), []);
+
+  // Keyboard: space/k play-pause, ←/→ ±10s (host), f fullscreen, m mute.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable || e.ctrlKey || e.metaKey || e.altKey) return;
+      const v = videoRef.current;
+      if (!v) return;
+      const k = e.key.toLowerCase();
+      if (isHost && (k === ' ' || k === 'k')) { e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); }
+      else if (isHost && k === 'arrowleft') { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); }
+      else if (isHost && k === 'arrowright') { e.preventDefault(); v.currentTime = v.currentTime + 10; }
+      else if (k === 'f') { e.preventDefault(); toggleFullscreen(); }
+      else if (k === 'm') { e.preventDefault(); v.muted = !v.muted; }
+      else return;
+      pokeUi();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHost]);
 
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
@@ -611,26 +671,33 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const showPrepError = prep?.status === 'error';
   const showVideoError = !!videoError && !showPrepOverlay && !showPrepError;
 
+  const hasVideo = !!(effectiveSrc || hlsActive);
+  const idle = hasVideo && !uiActive && isPlaying && !showSubMenu && !showAudioMenu;
+
   return (
     <div
-      className="player-wrap"
+      className={`player-wrap ${hasVideo ? 'has-bar' : ''} ${idle ? 'player-idle' : ''}`}
       ref={wrapRef}
+      onMouseMove={pokeUi}
+      onMouseLeave={() => { if (isPlaying) setUiActive(false); }}
       onDragOver={isHost ? (e) => e.preventDefault() : undefined}
       onDrop={isHost ? onDropSubtitle : undefined}
     >
-      {(effectiveSrc || hlsActive) ? (
+      {hasVideo ? (
         <video
-          ref={videoRef}
+          ref={setVideoRef}
           src={effectiveSrc || undefined}
-          controls={isHost}
+          controls={false}
           autoPlay={false}
           crossOrigin="anonymous"
+          onClick={isHost ? (e) => { const v = e.currentTarget; if (v.paused) v.play().catch(() => {}); else v.pause(); } : undefined}
+          onDoubleClick={toggleFullscreen}
           onLoadedMetadata={onLoadedMetadata}
           onError={onVideoError}
-          onPlay={() => !suppressRef.current && emitState({ paused: false })}
-          onPause={() => !suppressRef.current && emitState({ paused: true })}
+          onPlay={() => { setIsPlaying(true); if (!suppressRef.current) emitState({ paused: false }); }}
+          onPause={() => { setIsPlaying(false); setUiActive(true); if (!suppressRef.current) emitState({ paused: true }); }}
           onSeeked={() => !suppressRef.current && emitState()}
-          onPlaying={() => { autoStartRef.current = false; }}
+          onPlaying={() => { autoStartRef.current = false; setPlayedOnce(true); }}
           onTimeUpdate={onTimeUpdate}
           onEnded={() => onEnded?.()}
         >
@@ -654,6 +721,16 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         </video>
       ) : (
         <div className="player-prep-bg" />
+      )}
+
+      {hasVideo && (
+        <PlayerBar
+          video={videoEl}
+          isHost={isHost}
+          markers={isHost ? markers : null}
+          trickplay={isHost ? trickplay : null}
+          trickBase={streamBase && mediaId ? `${streamBase}/api/trickplay/${mediaId}` : null}
+        />
       )}
 
       {showPrepOverlay && (

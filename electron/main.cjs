@@ -193,7 +193,8 @@ app.whenReady().then(async () => {
   serverInfo = await startServer(SERVER_PORT, {
     audioCacheDir,
     importedSubsDir: path.join(app.getPath('userData'), 'imported-subs'),
-    markersFile: path.join(app.getPath('userData'), 'markers.json')
+    markersFile: path.join(app.getPath('userData'), 'markers.json'),
+    trickplayDir: path.join(app.getPath('userData'), 'trickplay')
   });
   // Drop partial HLS segment dirs from a previous run (keep complete ones warm).
   hls.sweepPartials();
@@ -241,6 +242,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', async () => {
   hls.stopAll();
+  require('./server/trickplay.cjs').stopAll();
   mpv.stop();
   await tunnel.stop();
   if (process.platform !== 'darwin') app.quit();
