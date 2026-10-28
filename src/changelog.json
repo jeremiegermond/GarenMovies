@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.13.1",
+    "date": "2026-10-28",
+    "items": [
+      "Correctif : les séries nommées avec leur année (« Breaking Bad (2008) - S03E01 - … ») sont de nouveau reconnues, avec leur affiche, regroupées par saison, et chaque épisode garde son numéro et son titre."
+    ]
+  },
+  {
     "version": "0.13.0",
     "date": "2026-10-21",
     "items": [

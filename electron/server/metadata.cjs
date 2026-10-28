@@ -59,7 +59,15 @@ function parseTitle(rawTitle) {
   // TV episode: "Show Name S01E01" / "s1e1" / "1x01"
   let m = t.match(/^(.+?)\s+s(\d{1,2})\s*e(\d{1,2})\b/i)
        || t.match(/^(.+?)\s+(\d{1,2})x(\d{1,2})\b/i);
-  if (m) return { name: cleanupName(m[1]), season: +m[2], episode: +m[3], isTV: true };
+  if (m) {
+    // "Breaking Bad (2008) - S03E01": the year is the series' first air year —
+    // a search hint, not part of the name (TMDB finds nothing for "Breaking Bad (2008)").
+    let name = cleanupName(m[1]);
+    let year = null;
+    const ym = name.match(/^(.+?)[\s\-_]*[([]?((?:19|20)\d{2})[)\]]?$/);
+    if (ym && cleanupName(ym[1])) { name = cleanupName(ym[1]); year = ym[2]; }
+    return { name, year, season: +m[2], episode: +m[3], isTV: true };
+  }
 
   // Movie: cut at the first release-year token (1900–2099) wherever it sits —
   // everything after it (codec/res/group) is junk. This turns
@@ -131,7 +139,9 @@ async function getSeasonData(tmdbId, season) {
 async function fetchAndCache(parsed, key) {
   let data;
   if (parsed.isTV) {
-    data = await searchTMDB('/search/tv', parsed.name);
+    data = await searchTMDB('/search/tv', parsed.name, parsed.year ? { first_air_date_year: parsed.year } : {});
+    // A wrong year hint shouldn't cost the match: retry without it.
+    if (parsed.year && data && !data.error && !data.results?.length) data = await searchTMDB('/search/tv', parsed.name);
   } else {
     const extras = parsed.year ? { year: parsed.year } : {};
     data = await searchTMDB('/search/movie', parsed.name, extras);
