@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.14.0",
+    "date": "2026-10-29",
+    "items": [
+      "**Sous-titres calés tout seuls** : l'app écoute les dialogues du film et recale automatiquement les sous-titres téléchargés ou ajoutés, même ceux qui dérivent au fil du film.",
+      "Bouton « Synchro auto » dans le menu des sous-titres pour lancer le calage à la main, et option dans les réglages pour le désactiver."
+    ]
+  },
+  {
     "version": "0.13.1",
     "date": "2026-10-28",
     "items": [

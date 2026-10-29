@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp, SkipForward } from 'lucide-react';
+import { Captions, Loader2, Check, Volume2, AlertTriangle, Search, RotateCcw, Crosshair, Maximize, Minimize, FileUp, SkipForward, AudioWaveform } from 'lucide-react';
 import SubtitleSearchModal from './SubtitleSearchModal.jsx';
 import PlayerBar from './PlayerBar.jsx';
 import { skipStep } from '../lib/skip.js';
+import { autoSubSyncFromConfig, formatShift } from '../lib/subsync.js';
 
 const SYNC_THRESHOLD = 1.0;
 
@@ -44,7 +45,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [activeSubIdx, setActiveSubIdx] = useState(-1);
   const [loadingSubIdx, setLoadingSubIdx] = useState(-1);
-  const [subOffset, setSubOffset] = useState(0); // seconds, +/-
+  const [subOffset, setSubOffset] = useState(0); // seconds, +/- (manual, on top of the auto sync)
+  // Audio-based sync of the active track: null | { idx, pending } | { idx, offset, scale, applied, error }
+  const [autoSync, setAutoSync] = useState(null);
+  const [autoSubSync, setAutoSubSync] = useState(true);
   const originalCuesRef = useRef(new Map()); // key = `${mediaId}-${subIdx}` -> [{start, end}]
 
   const [showSubSearch, setShowSubSearch] = useState(false);
@@ -79,6 +83,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     if (window.electronAPI?.getConfig) {
       window.electronAPI.getConfig().then((cfg) => {
         if (cfg?.defaultSubLang) setDefaultSubLang(cfg.defaultSubLang);
+        setAutoSubSync(autoSubSyncFromConfig(cfg));
       }).catch(() => {});
     }
   }, [streamBase, mediaId]);
@@ -180,6 +185,35 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   // Reset offset when the user picks a different subtitle track
   useEffect(() => { setSubOffset(0); }, [activeSubIdx]);
 
+  // Audio sync: external subtitles (next to the file, downloaded, imported)
+  // are synced as soon as they're turned on; embedded ones come from the same
+  // release and only on request (« Synchro auto »). The server computes it
+  // once and caches it, so guests get the same result instantly.
+  const [syncRequest, setSyncRequest] = useState(0);
+  const activeSub = activeSubIdx >= 0 ? subs[activeSubIdx] : null;
+  const wantSync = !!activeSub && (syncRequest > 0 || (autoSubSync && !activeSub.embedded));
+  useEffect(() => { setAutoSync(null); setSyncRequest(0); }, [activeSubIdx, mediaId]);
+  useEffect(() => {
+    if (!wantSync || !streamBase) return;
+    const idx = activeSubIdx;
+    let stop = false, timer = null;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${streamBase}/api/subs/${mediaId}/${idx}/sync`).then((x) => x.json());
+        if (stop) return;
+        setAutoSync({ idx, ...r });
+        if (r.pending) timer = setTimeout(poll, 1500);
+      } catch {
+        if (!stop) timer = setTimeout(poll, 4000);
+      }
+    };
+    setAutoSync({ idx, pending: true });
+    poll();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [wantSync, activeSubIdx, mediaId, streamBase]);
+  const syncShift = autoSync && autoSync.idx === activeSubIdx && autoSync.applied
+    ? { offset: autoSync.offset, scale: autoSync.scale } : { offset: 0, scale: 1 };
+
   // A subtitle was downloaded somewhere in the room → auto-activate it here too
   // (host download propagates to every guest via the `sub:activate` socket).
   useEffect(() => {
@@ -262,12 +296,13 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
         originalCuesRef.current.set(trackId, orig);
       }
       const n = Math.min(track.cues.length, orig.length);
+      const { offset, scale } = syncShift;
       for (let i = 0; i < n; i++) {
         const c = track.cues[i];
         const o = orig[i];
         try {
-          c.startTime = Math.max(0, o.start + subOffset);
-          c.endTime = Math.max(c.startTime + 0.01, o.end + subOffset);
+          c.startTime = Math.max(0, o.start * scale + offset + subOffset);
+          c.endTime = Math.max(c.startTime + 0.01, o.end * scale + offset + subOffset);
         } catch { /* some browsers reject negative/overlapping times */ }
       }
       return true;
@@ -278,7 +313,7 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     const t2 = setTimeout(apply, 800);
     const t3 = setTimeout(apply, 2000);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, [activeSubIdx, subOffset, mediaId, effectiveSrc]);
+  }, [activeSubIdx, subOffset, syncShift.offset, syncShift.scale, mediaId, effectiveSrc]);
 
   function syncSubToCurrentTime() {
     const v = videoRef.current;
@@ -898,10 +933,25 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                   <div className="sub-offset">
                     <div className="sub-offset-head">
                       <span>Décalage</span>
-                      <span className={`sub-offset-value ${subOffset !== 0 ? 'shifted' : ''}`}>
-                        {subOffset === 0 ? '0.00 s' : `${subOffset > 0 ? '+' : ''}${subOffset.toFixed(2)} s`}
+                      <span className={`sub-offset-value ${syncShift.offset + subOffset !== 0 ? 'shifted' : ''}`}>
+                        {formatShift(+(syncShift.offset + subOffset).toFixed(3))}
                       </span>
                     </div>
+                    {autoSync && autoSync.idx === activeSubIdx && (
+                      <div className={`sub-sync-status ${autoSync.applied ? 'ok' : ''}`}>
+                        {autoSync.pending ? (
+                          <><Loader2 size={11} className="spin" /> Écoute des dialogues pour caler les sous-titres…</>
+                        ) : autoSync.applied ? (
+                          <><Check size={11} strokeWidth={2.5} /> Calés sur le son : {formatShift(autoSync.offset)}{autoSync.scale !== 1 ? ', vitesse corrigée' : ''}</>
+                        ) : autoSync.sure ? (
+                          <><Check size={11} strokeWidth={2.5} /> Déjà calés sur le son</>
+                        ) : autoSync.error ? (
+                          <>Synchro auto impossible sur ce fichier</>
+                        ) : (
+                          <>Pas de calage sûr trouvé : ajuste à la main</>
+                        )}
+                      </div>
+                    )}
                     <div className="sub-offset-row">
                       <button onClick={() => setSubOffset((o) => +(o - 0.5).toFixed(3))} title="Avancer les sous-titres de 0.5 s">−0.5</button>
                       <button onClick={() => setSubOffset((o) => +(o - 0.1).toFixed(3))} title="Avancer les sous-titres de 0.1 s">−0.1</button>
@@ -915,6 +965,14 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
                         title="Aligne la phrase la plus proche sur le temps actuel"
                       >
                         <Crosshair size={12} strokeWidth={2} /> Aligner ici
+                      </button>
+                      <button
+                        className="sub-offset-action"
+                        onClick={() => { setSubOffset(0); setSyncRequest((n) => n + 1); }}
+                        disabled={!!autoSync?.pending && autoSync.idx === activeSubIdx}
+                        title="Écoute les dialogues du film et cale les sous-titres dessus"
+                      >
+                        <AudioWaveform size={12} strokeWidth={2} /> Synchro auto
                       </button>
                       {subOffset !== 0 && (
                         <button

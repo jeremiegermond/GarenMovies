@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X, Eye, EyeOff, Check, Info, Sparkles } from 'lucide-react';
 import { SHOW_CHANGELOG_EVENT } from '../lib/changelog.js';
 import { autoSkipFromConfig, AUTO_SKIP_KEY } from '../lib/skip.js';
+import { autoSubSyncFromConfig, AUTO_SUB_SYNC_KEY } from '../lib/subsync.js';
 
 export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [tmdbKey, setTmdbKey] = useState('');
@@ -12,6 +13,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const [originalDefaultSubLang, setOriginalDefaultSubLang] = useState('fr');
   const [autoSkip, setAutoSkip] = useState(false);
   const [originalAutoSkip, setOriginalAutoSkip] = useState(false);
+  const [autoSubSync, setAutoSubSync] = useState(true);
+  const [originalAutoSubSync, setOriginalAutoSubSync] = useState(true);
   const [nick, setNick] = useState(nickname || '');
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -28,6 +31,8 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
       setOriginalDefaultSubLang(cfg.defaultSubLang || 'fr');
       setAutoSkip(autoSkipFromConfig(cfg));
       setOriginalAutoSkip(autoSkipFromConfig(cfg));
+      setAutoSubSync(autoSubSyncFromConfig(cfg));
+      setOriginalAutoSubSync(autoSubSyncFromConfig(cfg));
       setLoading(false);
     });
   }, []);
@@ -37,16 +42,19 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
   const langChanged = defaultSubLang !== originalDefaultSubLang;
   const nickChanged = nick.trim() && nick !== nickname;
   const autoSkipChanged = autoSkip !== originalAutoSkip;
-  const dirty = tmdbChanged || osChanged || langChanged || nickChanged || autoSkipChanged;
+  const autoSubSyncChanged = autoSubSync !== originalAutoSubSync;
+  const dirty = tmdbChanged || osChanged || langChanged || nickChanged || autoSkipChanged || autoSubSyncChanged;
 
   async function save() {
     await window.electronAPI.setConfig({
       tmdbApiKey: tmdbKey.trim(),
       openSubtitlesApiKey: osKey.trim(),
       defaultSubLang,
-      [AUTO_SKIP_KEY]: autoSkip
+      [AUTO_SKIP_KEY]: autoSkip,
+      [AUTO_SUB_SYNC_KEY]: autoSubSync
     });
     setOriginalAutoSkip(autoSkip);
+    setOriginalAutoSubSync(autoSubSync);
     setOriginalTmdbKey(tmdbKey.trim());
     setOriginalOsKey(osKey.trim());
     setOriginalDefaultSubLang(defaultSubLang);
@@ -148,6 +156,19 @@ export default function SettingsModal({ onClose, nickname, onNicknameChange }) {
               <option value="ru">Русский</option>
               <option value="ja">日本語</option>
             </select>
+          </div>
+
+          <div className="field">
+            <label className="field-check">
+              <input type="checkbox" checked={autoSubSync} onChange={(e) => setAutoSubSync(e.target.checked)} disabled={loading} />
+              <span>
+                <b>Synchroniser automatiquement les sous-titres</b>
+                <span className="field-check-help">
+                  L'app écoute les dialogues du film et cale tout seuls les sous-titres téléchargés ou ajoutés à côté du fichier.
+                  Le bouton « Synchro auto » du menu des sous-titres reste disponible dans tous les cas.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="field">
