@@ -858,7 +858,18 @@ input:disabled { opacity: 0.5; }
   color: var(--text);
 }
 .sub-offset-action { flex: 1; }
+.sub-offset-row > button:disabled { opacity: 0.5; cursor: default; }
 .sub-offset-reset { flex: 0 0 auto !important; width: 32px; padding: 6px !important; }
+.sub-sync-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+.sub-sync-status.ok { color: var(--text-secondary); }
+.sub-sync-status svg { flex: 0 0 auto; }
 
 /* Native select styling */
 .select {

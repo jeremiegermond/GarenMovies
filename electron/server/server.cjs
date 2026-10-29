@@ -12,6 +12,7 @@ const vlc = require('./vlc.cjs');
 const hls = require('./hls.cjs');
 const markers = require('./markers.cjs');
 const trickplay = require('./trickplay.cjs');
+const subsync = require('./subsync.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
 
 // Patterns that indicate ffmpeg couldn't even parse the input container —
@@ -99,6 +100,22 @@ function safeCatalog() {
     catalogue: catalogue.map(stripMedia),
     stream: stream.map(stripMedia)
   };
+}
+
+async function subVtt(m, sub) {
+  if (sub.type === 'sidecar') return subtitles.getSidecarAsVTT(sub);
+  if (sub.type === 'embedded') return subtitles.getEmbeddedAsVTT(m, sub);
+  return null;
+}
+
+// Start syncing a film's external subtitles (files next to it, downloaded,
+// imported) as soon as it's picked, so it's ready when one is turned on.
+// Embedded tracks come from the same release as the video: already in sync.
+function presyncSubs(m) {
+  if (!m?.duration) return; // not probed yet: the player's request starts it later
+  for (const sub of m.subs || []) {
+    if (sub.type === 'sidecar') subsync.sync(m, sub, () => subVtt(m, sub));
+  }
 }
 
 function broadcastViewers() {
@@ -230,6 +247,7 @@ function startServer(port, opts = {}) {
   }
   importedSubsDir = opts.importedSubsDir || null;
   if (opts.markersFile) markers.setCacheFile(opts.markersFile);
+  if (opts.subsyncFile) subsync.setCachePath(opts.subsyncFile);
   if (opts.trickplayDir) trickplay.setCacheDir(opts.trickplayDir);
   if (importedSubsDir) { try { fs.mkdirSync(importedSubsDir, { recursive: true }); } catch {} }
 
@@ -492,6 +510,7 @@ function startServer(port, opts = {}) {
         // Tell everyone in the room to auto-activate the freshly downloaded
         // sub, so guests get it too (not just available in their menu).
         if (io) io.emit('sub:activate', { mediaId, idx: sub.idx });
+        presyncSubs(m);
         res.json({
           sub: { idx: sub.idx, lang: sub.lang, label: sub.label, embedded: false, type: sub.type },
           remaining: result.remaining,
@@ -527,10 +546,22 @@ function startServer(port, opts = {}) {
         if (!sub) return res.status(500).json({ error: 'Ajout impossible' });
         broadcastCatalog();
         if (io) io.emit('sub:activate', { mediaId, idx: sub.idx });
+        presyncSubs(m);
         res.json({ sub: { idx: sub.idx, lang: sub.lang, label: sub.label, embedded: false, type: sub.type } });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
+    });
+
+    // Audio-based sync of a subtitle track: { pending: true } while the film's
+    // sound is analysed (a few seconds, once — the result is cached and shared
+    // by every viewer), then { offset, scale, applied }.
+    app.get('/api/subs/:mediaId/:idx/sync', (req, res) => {
+      const m = getMedia(req.params.mediaId);
+      const sub = m && (m.subs || [])[parseInt(req.params.idx, 10)];
+      if (!sub) return res.status(404).json({ error: 'Unknown subtitle' });
+      const result = subsync.status(m, sub, () => subVtt(m, sub));
+      res.json(result || { pending: true });
     });
 
     app.get('/api/subs/:mediaId/:idx.vtt', async (req, res) => {
@@ -541,12 +572,7 @@ function startServer(port, opts = {}) {
       if (!sub) return res.status(404).end('Unknown subtitle');
 
       try {
-        let vtt = null;
-        if (sub.type === 'sidecar') {
-          vtt = subtitles.getSidecarAsVTT(sub);
-        } else if (sub.type === 'embedded') {
-          vtt = await subtitles.getEmbeddedAsVTT(m, sub);
-        }
+        const vtt = await subVtt(m, sub);
         if (!vtt) return res.status(415).end('Unsupported subtitle format');
         res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -597,6 +623,7 @@ function startServer(port, opts = {}) {
         state.currentTime = 0;
         state.updatedAt = Date.now();
         io.emit('state', projectedState());
+        presyncSubs(getMedia(mediaId));
       });
 
       socket.on('client:resync', () => {
