@@ -14,13 +14,14 @@ const SYNC_THRESHOLD = 1.0;
 const HEVC_RE = /^(hevc|h\.?265|x265)$/i;
 function isHevc(codec) { return HEVC_RE.test(String(codec || '')); }
 
-export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, markers = null, autoSkip = false, hasNextEpisode = false, onCreditsStart, onNextEpisode, children }) {
+export default function Player({ src, isHost, syncState, onHostStateChange, subs = [], audioTracks = [], videoCodec = null, subActivation = null, streamBase, mediaId, mediaTitle, mediaMeta, onOpenSettings, onEnded, autoStart = false, markers = null, autoSkip = false, hasNextEpisode = false, onCreditsStart, onNextEpisode, onProgress, resumeAt = null, children }) {
   const videoRef = useRef(null);
   const wrapRef = useRef(null);
   const suppressRef = useRef(false);
   const pendingSeekRef = useRef(null);
   const wasPlayingRef = useRef(false);
   const autoStartRef = useRef(false); // start this media on load (auto-next episode), until it actually plays
+  const lastProgressRef = useRef(0);
   const syncStateRef = useRef(syncState);
   syncStateRef.current = syncState;
   // Intro / credits skipping (host only — guests follow the host's seeks).
@@ -134,6 +135,22 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     setIsPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaId]);
+
+  // "Reprendre" / "Depuis le début": go to that position and play — now if the
+  // video is loaded, else as soon as it is (declared after the reset above, so
+  // a resume that comes with a new media survives it).
+  useEffect(() => {
+    if (!resumeAt || resumeAt.mediaId !== mediaId) return;
+    const v = videoRef.current;
+    if (v && v.readyState >= 1) {
+      try { v.currentTime = resumeAt.at; } catch {}
+      v.play().catch(() => {});
+    } else {
+      pendingSeekRef.current = resumeAt.at;
+      autoStartRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeAt]);
 
   // Seek-bar previews (host): start generating the sheets as soon as the video
   // has loaded (the first segment is on screen, playing or not), then poll until
@@ -363,8 +380,10 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
       // Guests joining mid-film start where the host is, instead of loading the
       // film's beginning first (segments are produced on demand — prefetching
       // 0:00 would just pull the encoder away from the host's position).
+      // Same for the host resuming a film: load from there directly.
       const sync = syncStateRef.current;
-      const startPosition = !isHost && sync?.mediaId === mediaId ? Math.max(0, sync.currentTime || 0) : 0;
+      const startPosition = !isHost && sync?.mediaId === mediaId ? Math.max(0, sync.currentTime || 0)
+        : (isHost && pendingSeekRef.current) || 0;
       const hls = new Hls({ enableWorker: true, startPosition, maxBufferLength: 30 });
       hls.loadSource(hlsUrl);
       hls.attachMedia(v);
@@ -422,9 +441,14 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
   // Skip the opening / react to the end credits as playback moves (host only;
   // the seeks reach guests through onSeeked → emitState like any other seek).
   function onTimeUpdate() {
-    if (!isHost || !markers) return;
     const v = videoRef.current;
-    if (!v) return;
+    if (!isHost || !v) return;
+    // Where we are, every 10 s while playing → "reprendre" next time.
+    if (onProgress && !v.paused && Date.now() - lastProgressRef.current >= 10000) {
+      lastProgressRef.current = Date.now();
+      onProgress(v.currentTime);
+    }
+    if (!markers) return;
     const { action, ui } = skipStep(v.currentTime, markers, {
       introDone: introDoneRef.current, creditsDone: creditsDoneRef.current,
       autoSkip, hasNext: hasNextEpisode, duration: v.duration
@@ -615,10 +639,11 @@ export default function Player({ src, isHost, syncState, onHostStateChange, subs
     if (code === 1) return;
     if (code !== 2 && code !== 3 && code !== 4) return;
 
-    // Preserve playback position before the reload
+    // Preserve playback position before the reload (or the resume position
+    // still waiting, when this source never got to load)
     const v = videoRef.current;
     if (v) {
-      pendingSeekRef.current = v.currentTime;
+      pendingSeekRef.current = v.readyState >= 1 ? v.currentTime : (pendingSeekRef.current ?? v.currentTime);
       wasPlayingRef.current = !v.paused;
     }
 

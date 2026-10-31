@@ -25,6 +25,7 @@ export default function Client({ onLeave }) {
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [progress, setProgress] = useState({}); // where the host's films / episodes were left
 
   const [roomURL, setRoomURL] = useState('');
   const [connected, setConnected] = useState(false);
@@ -82,6 +83,7 @@ export default function Client({ onLeave }) {
     socket.on('disconnect', () => setConnected(false));
     socket.on('state', (s) => setSyncState(s));
     socket.on('catalog', (cat) => setCatalog(cat));
+    socket.on('progress', (p) => setProgress(p || {}));
     socket.on('sub:activate', ({ mediaId, idx }) => setSubActivation({ mediaId, idx, ts: Date.now() }));
     socket.on('viewers', ({ count }) => setViewers(Math.max(0, count - 1)));
     socket.on('host-left', () => setSyncState((s) => s && { ...s, paused: true }));
@@ -124,6 +126,7 @@ export default function Client({ onLeave }) {
               catalog={catalog}
               activeId={activeId}
               onSelect={clientSelectMovie}
+              progress={progress}
               canSelect={connected}
               connected={connected}
               hasApiKey={true}

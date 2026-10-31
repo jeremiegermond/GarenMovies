@@ -13,6 +13,7 @@ const hls = require('./hls.cjs');
 const markers = require('./markers.cjs');
 const trickplay = require('./trickplay.cjs');
 const subsync = require('./subsync.cjs');
+const progress = require('./progress.cjs');
 const { addDownloadedSub } = require('./catalog.cjs');
 
 // Patterns that indicate ffmpeg couldn't even parse the input container —
@@ -248,6 +249,7 @@ function startServer(port, opts = {}) {
   importedSubsDir = opts.importedSubsDir || null;
   if (opts.markersFile) markers.setCacheFile(opts.markersFile);
   if (opts.subsyncFile) subsync.setCachePath(opts.subsyncFile);
+  if (opts.progressFile) progress.setFile(opts.progressFile);
   if (opts.trickplayDir) trickplay.setCacheDir(opts.trickplayDir);
   if (importedSubsDir) { try { fs.mkdirSync(importedSubsDir, { recursive: true }); } catch {} }
 
@@ -592,6 +594,7 @@ function startServer(port, opts = {}) {
       socket.emit('state', projectedState());
       socket.emit('catalog', safeCatalog());
       socket.emit('chat:history', chatHistory);
+      socket.emit('progress', progress.all());
       broadcastViewers();
 
       socket.on('hello', ({ role: requestedRole, nickname } = {}) => {
@@ -614,6 +617,13 @@ function startServer(port, opts = {}) {
         state.currentTime = Number(payload.currentTime) || 0;
         state.updatedAt = Date.now();
         socket.broadcast.emit('state', projectedState());
+        if (progress.record(getMedia(state.mediaId), state.currentTime)) io.emit('progress', progress.all());
+      });
+
+      // Position heartbeat while playing (every ~10 s) → "reprendre" later.
+      socket.on('host:progress', ({ mediaId, currentTime } = {}) => {
+        if (socket.id !== hostSocketId) return;
+        if (progress.record(getMedia(mediaId), Number(currentTime))) io.emit('progress', progress.all());
       });
 
       socket.on('host:select', ({ mediaId }) => {

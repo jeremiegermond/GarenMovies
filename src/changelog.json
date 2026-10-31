@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.15.0",
+    "date": "2026-10-31",
+    "items": [
+      "**Reprendre là où tu t'étais arrêté** : en rouvrant un film ou un épisode commencé, l'app propose de reprendre au bon moment ou de recommencer.",
+      "Mauvais épisode ? Si tu ouvres un autre épisode que celui où tu en étais, l'app te propose d'aller directement au bon (ou au suivant si tu l'avais fini).",
+      "La bibliothèque montre où tu en es : barre de progression sur les affiches et les épisodes, et « Vu » sur ceux terminés."
+    ]
+  },
+  {
     "version": "0.14.0",
     "date": "2026-10-29",
     "items": [

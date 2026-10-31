@@ -195,6 +195,7 @@ app.whenReady().then(async () => {
     importedSubsDir: path.join(app.getPath('userData'), 'imported-subs'),
     markersFile: path.join(app.getPath('userData'), 'markers.json'),
     subsyncFile: path.join(app.getPath('userData'), 'subsync.json'),
+    progressFile: path.join(app.getPath('userData'), 'progress.json'),
     trickplayDir: path.join(app.getPath('userData'), 'trickplay')
   });
   // Drop partial HLS segment dirs from a previous run (keep complete ones warm).

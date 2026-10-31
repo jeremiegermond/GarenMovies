@@ -1,8 +1,23 @@
 import { useState } from 'react';
-import { Film, Play, X, Layers, RefreshCw, Folder } from 'lucide-react';
+import { Film, Play, X, Layers, RefreshCw, Folder, Check } from 'lucide-react';
 import { displayTitle, byTitle } from '../lib/titles.js';
 
-function MovieCard({ movie, active, onClick, canSelect }) {
+// Where a film / episode was left (progress.cjs entry): a thin bar along the
+// bottom of the poster, or a "Vu" tag once watched.
+function WatchState({ p, row = false }) {
+  if (!p) return null;
+  if (p.done) {
+    return <span className={row ? 'episode-seen' : 'card-seen-tag'}><Check size={10} strokeWidth={3} /> Vu</span>;
+  }
+  if (!(p.pos >= 30 && p.dur > 0)) return null;
+  return (
+    <div className={row ? 'episode-progress' : 'card-progress'}>
+      <div style={{ width: `${Math.min(100, (p.pos / p.dur) * 100)}%` }} />
+    </div>
+  );
+}
+
+function MovieCard({ movie, active, onClick, canSelect, progress }) {
   const poster = movie.meta?.poster;
   const year = movie.meta?.year;
   const hasSubs = movie.subs?.length > 0;
@@ -30,6 +45,7 @@ function MovieCard({ movie, active, onClick, canSelect }) {
             En cours
           </div>
         )}
+        {!active && <WatchState p={progress?.[movie.id]} />}
       </div>
       <div className="card-info">
         <div className="card-title">{name}</div>
@@ -39,9 +55,14 @@ function MovieCard({ movie, active, onClick, canSelect }) {
   );
 }
 
-function SeriesCard({ group, activeId, onSelectEpisode, canSelect }) {
+function SeriesCard({ group, activeId, onSelectEpisode, canSelect, progress }) {
   const [open, setOpen] = useState(false);
   const activeEp = group.episodes.find((ep) => ep.id === activeId);
+  // The episode of this season watched last: its bar on the season's poster.
+  const lastEp = group.episodes.reduce((best, ep) => {
+    const p = progress?.[ep.id];
+    return p && !p.done && (!best || p.at > progress[best.id].at) ? ep : best;
+  }, null);
   const epCount = group.episodes.length;
   const anySubs = group.episodes.some((ep) => ep.subs?.length > 0);
   return (
@@ -72,6 +93,7 @@ function SeriesCard({ group, activeId, onSelectEpisode, canSelect }) {
               En cours
             </div>
           )}
+          {!activeEp && lastEp && <WatchState p={progress[lastEp.id]} />}
         </div>
         <div className="card-info">
           <div className="card-title">{group.showName}</div>
@@ -84,6 +106,7 @@ function SeriesCard({ group, activeId, onSelectEpisode, canSelect }) {
         <EpisodePicker
           group={group}
           activeId={activeId}
+          progress={progress}
           onSelect={(ep) => { onSelectEpisode(ep); setOpen(false); }}
           onClose={() => setOpen(false)}
         />
@@ -92,7 +115,7 @@ function SeriesCard({ group, activeId, onSelectEpisode, canSelect }) {
   );
 }
 
-function EpisodePicker({ group, activeId, onSelect, onClose }) {
+function EpisodePicker({ group, activeId, onSelect, onClose, progress }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal episode-picker" onClick={(e) => e.stopPropagation()}>
@@ -128,8 +151,10 @@ function EpisodePicker({ group, activeId, onSelect, onClose }) {
                 <div className="episode-info">
                   <div className="episode-title">{epTitle || ep.title}</div>
                   {epTitle && <div className="episode-filename">{ep.title}</div>}
+                  {!progress?.[ep.id]?.done && <WatchState p={progress?.[ep.id]} row />}
                 </div>
                 <div className="episode-tags">
+                  {progress?.[ep.id]?.done && <WatchState p={progress[ep.id]} row />}
                   {hasSubs && <span className="episode-cc">CC</span>}
                   {isActive ? (
                     <span className="episode-playing">
@@ -191,7 +216,7 @@ function normalizeKey(s) {
   return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyMessage }) {
+function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyMessage, progress }) {
   const groups = groupItems(items);
   return (
     <section className="cat-section">
@@ -216,6 +241,7 @@ function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyM
               active={g.item.id === activeId}
               onClick={() => onSelect && onSelect(g.item)}
               canSelect={canSelect}
+              progress={progress}
             />
           ) : (
             <SeriesCard
@@ -224,6 +250,7 @@ function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyM
               activeId={activeId}
               onSelectEpisode={(ep) => onSelect && onSelect(ep)}
               canSelect={canSelect}
+              progress={progress}
             />
           ))}
         </div>
@@ -232,7 +259,7 @@ function Section({ title, subtitle, items, activeId, onSelect, canSelect, emptyM
   );
 }
 
-export default function CatalogueView({ catalog, activeId, onSelect, canSelect, connected, hasApiKey, onOpenSettings, isHost, onRescan, onPickFolder, scanning, hideServerSection, streamTitle = 'Stream' }) {
+export default function CatalogueView({ catalog, activeId, onSelect, canSelect, progress = {}, connected, hasApiKey, onOpenSettings, isHost, onRescan, onPickFolder, scanning, hideServerSection, streamTitle = 'Stream' }) {
   const total = (catalog.catalogue?.length || 0) + (catalog.stream?.length || 0);
   return (
     <div className="catalogue-view">
@@ -264,6 +291,7 @@ export default function CatalogueView({ catalog, activeId, onSelect, canSelect, 
           title="Catalogue"
           subtitle="Films hébergés sur le serveur — bientôt disponible"
           items={catalog.catalogue || []}
+          progress={progress}
           activeId={activeId}
           onSelect={onSelect}
           canSelect={canSelect}
@@ -274,6 +302,7 @@ export default function CatalogueView({ catalog, activeId, onSelect, canSelect, 
         title={streamTitle}
         subtitle={isHost ? "Films de votre bibliothèque locale" : "Films partagés par l'hôte"}
         items={catalog.stream || []}
+        progress={progress}
         activeId={activeId}
         onSelect={onSelect}
         canSelect={canSelect}
