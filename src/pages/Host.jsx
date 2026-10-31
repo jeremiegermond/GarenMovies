@@ -9,6 +9,8 @@ import Player from '../components/Player.jsx';
 import { displayTitle } from '../lib/titles.js';
 import TorrentsView from '../components/TorrentsView.jsx';
 import NextUpOverlay from '../components/NextUpOverlay.jsx';
+import ResumeOverlay from '../components/ResumeOverlay.jsx';
+import { resumeOffer, resumePos } from '../lib/resume.js';
 import { findNextEpisode, findPairEpisode } from '../lib/episodes.js';
 import { autoSkipFromConfig } from '../lib/skip.js';
 
@@ -30,6 +32,9 @@ export default function Host({ onLeave }) {
   const [markers, setMarkers] = useState(null); // intro / credits positions of the active film
   const [autoSkip, setAutoSkip] = useState(false);
   const [subActivation, setSubActivation] = useState(null); // { mediaId, idx, ts }
+  const [progress, setProgress] = useState({}); // where each film / episode was left (server)
+  const [offer, setOffer] = useState(null); // { mediaId, here, elsewhere } — the "Reprendre ?" card
+  const [resumeAt, setResumeAt] = useState(null); // { mediaId, at, n } → Player seeks + plays
   const [viewers, setViewers] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [tunnelURL, setTunnelURL] = useState(null);
@@ -63,6 +68,7 @@ export default function Host({ onLeave }) {
     socket.on('viewers', ({ count }) => setViewers(Math.max(0, count - 1)));
     socket.on('catalog', (cat) => setCatalog(cat));
     socket.on('sub:activate', ({ mediaId, idx }) => setSubActivation({ mediaId, idx, ts: Date.now() }));
+    socket.on('progress', (p) => setProgress(p || {}));
     return () => { socket.disconnect(); socketRef.current = null; };
   }, [serverInfo]);
 
@@ -93,17 +99,38 @@ export default function Host({ onLeave }) {
     } finally { setScanning(false); }
   }
 
-  function selectMovie(m, { auto = false } = {}) {
+  // auto: chained by the app (next episode, "reprendre" elsewhere) → plays
+  // straight away, from where it was left if it was; a click by hand first
+  // asks "Reprendre ?" when there's something to resume.
+  function selectMovie(m, { auto = false, at } = {}) {
     setActiveId(m.id);
     setNextUp(null);
     setAutoStartId(auto ? m.id : null);
     socketRef.current?.emit('host:select', { mediaId: m.id });
     setTab('room');
+    const start = at ?? (auto ? resumePos(progress, m.id) : null);
+    setResumeAt(start ? { mediaId: m.id, at: start, n: Date.now() } : null);
+    const o = auto ? null : resumeOffer(catalog, progress, m);
+    setOffer(o ? { mediaId: m.id, ...o } : null);
   }
 
   function pushHostState(payload) {
-    if (payload?.paused === false) setNextUp(null); // replaying the ended episode cancels the countdown
+    if (payload?.paused === false) { setNextUp(null); setOffer(null); } // pressing play answers "Reprendre ?" too
     socketRef.current?.emit('host:state', { mediaId: activeId, ...payload });
+  }
+
+  function onResume() {
+    if (offer?.here != null) setResumeAt({ mediaId: offer.mediaId, at: offer.here, n: Date.now() });
+    setOffer(null);
+  }
+  function onRestart() {
+    setResumeAt({ mediaId: offer.mediaId, at: 0, n: Date.now() });
+    setOffer(null);
+  }
+  function onGoTo() {
+    const target = offer?.elsewhere;
+    setOffer(null);
+    if (target) selectMovie(target.media, { auto: true, at: target.pos ?? 0 });
   }
 
   // Episode finished → offer the next one; guests follow via host:select.
@@ -192,6 +219,7 @@ export default function Host({ onLeave }) {
               catalog={catalog}
               activeId={activeId}
               onSelect={selectMovie}
+              progress={progress}
               canSelect={true}
               connected={true}
               hasApiKey={hasApiKey}
@@ -282,9 +310,21 @@ export default function Host({ onLeave }) {
                   hasNextEpisode={!!nextEpisode}
                   onCreditsStart={onEpisodeEnded}
                   onNextEpisode={() => { if (nextEpisode) selectMovie(nextEpisode, { auto: true }); }}
+                  onProgress={(t) => socketRef.current?.emit('host:progress', { mediaId: activeId, currentTime: t })}
+                  resumeAt={resumeAt}
                 >
                   {nextUp && (
                     <NextUpOverlay next={nextUp} onPlay={playNextUp} onCancel={() => setNextUp(null)} />
+                  )}
+                  {!nextUp && offer && offer.mediaId === activeId && (
+                    <ResumeOverlay
+                      media={activeMedia}
+                      offer={offer}
+                      onResume={onResume}
+                      onRestart={onRestart}
+                      onGoTo={onGoTo}
+                      onClose={() => setOffer(null)}
+                    />
                   )}
                 </Player>
               </main>
